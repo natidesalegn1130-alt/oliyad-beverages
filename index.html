@@ -1,0 +1,2509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Oliyad Beverages</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc, query, where, orderBy, limit, onSnapshot, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey:            "AIzaSyBZUwcJUy_GTvuhS9VVo9XdxMN6NiIEm3s",
+  authDomain:        "oliyad-beverages-61d1d.firebaseapp.com",
+  projectId:         "oliyad-beverages-61d1d",
+  storageBucket:     "oliyad-beverages-61d1d.firebasestorage.app",
+  messagingSenderId: "446497635395",
+  appId:             "1:446497635395:web:9c918429232c2dbb0468f6"
+};
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+window.DB = db;
+window.Auth = auth;
+window.FS = { collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc, query, where, orderBy, limit, onSnapshot, serverTimestamp, increment };
+
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    try {
+      const snap = await getDoc(doc(db, "staff", user.uid));
+      if (snap.exists()) {
+        window.CURRENT_USER = { uid: user.uid, ...snap.data() };
+        showApp();
+      } else {
+        document.getElementById("li-error").textContent = "Account not set up. Contact your CEO.";
+        await signOut(auth);
+        showLogin();
+      }
+    } catch(e) {
+      document.getElementById("li-error").textContent = "Error: " + e.message;
+      showLogin();
+    }
+  } else {
+    showLogin();
+  }
+});
+
+window.doLogin = async () => {
+  const email = document.getElementById("li-email").value.trim();
+  const pass  = document.getElementById("li-pass").value;
+  const err   = document.getElementById("li-error");
+  err.textContent = "";
+  if (!email || !pass) { err.textContent = "Enter email and password."; return; }
+  try {
+    setLoading(true);
+    await signInWithEmailAndPassword(auth, email, pass);
+  } catch(e) {
+    err.textContent = "Wrong email or password. Try again.";
+  } finally {
+    setLoading(false);
+  }
+};
+
+window.doLogout = async () => { await signOut(auth); };
+
+window.loadBranches = async () => {
+  const snaps = await getDocs(collection(db, "branches"));
+  const list = [];
+  snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  window._branches = list;
+  renderBranches(list);
+  populateSelects();
+};
+
+window.saveBranch = async () => {
+  const name  = document.getElementById("inp-branch-name").value.trim();
+  const loc   = document.getElementById("inp-branch-loc").value.trim();
+  const cur   = document.getElementById("inp-branch-cur").value;
+  const isCar = document.getElementById("inp-branch-iscar") ? document.getElementById("inp-branch-iscar").checked : false;
+  if (!name || !loc) { alert("Fill in all fields"); return; }
+  setLoading(true);
+  await addDoc(collection(db, "branches"), { name, location: loc, currency: cur, isCar, isActive: true, createdAt: serverTimestamp() });
+  closeModal("modal-branch");
+  loadBranches();
+  setLoading(false);
+};
+
+window.loadProducts = async () => {
+  const snaps = await getDocs(collection(db, "products"));
+  const list = [];
+  snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  window._products = list;
+  renderProducts(list);
+  populateSelects();
+};
+
+window.saveProduct = async () => {
+  const name  = document.getElementById("inp-prod-name").value.trim();
+  const sku   = document.getElementById("inp-prod-sku").value.trim();
+  const unit  = document.getElementById("inp-prod-unit").value.trim();
+  const cat   = document.getElementById("inp-prod-cat").value;
+  let brand = document.getElementById("inp-prod-brand").value.trim();
+  if (!brand) {
+    // Auto-detect brand from product name
+    const nu = name.toUpperCase();
+    if (nu.startsWith("KK")) brand = "KK";
+    else if (nu.startsWith("PEPSI")) brand = "Pepsi";
+    else if (nu.startsWith("COCA") || nu.startsWith("COKE")) brand = "Coca-Cola";
+    else if (nu.startsWith("AMBO")) brand = "Ambo";
+    else if (nu.startsWith("SPRITE")) brand = "Sprite";
+    else if (nu.startsWith("MIRINDA")) brand = "Mirinda";
+    else brand = cat;
+  }
+  if (!name || !sku || !unit) { alert("Fill in all fields"); return; }
+  setLoading(true);
+  await addDoc(collection(db, "products"), { name, sku, unit, category: cat, brand, isActive: true, createdAt: serverTimestamp() });
+  closeModal("modal-product");
+  window._selectedBrand = brand;
+  loadProducts();
+  setLoading(false);
+};
+
+window.loadStock = async () => {
+  const u = window.CURRENT_USER;
+  const snaps = await getDocs(collection(db, "stock"));
+  const list = [];
+  snaps.forEach(d => {
+    const data = d.data();
+    if (u.role === "ceo" || data.branchId === u.branchId) list.push({ id: d.id, ...data });
+  });
+  renderStock(list);
+};
+
+window.saveAdjustment = async () => {
+  const branchId  = document.getElementById("inp-adj-branch").value;
+  const productId = document.getElementById("inp-adj-product").value;
+  const type      = document.getElementById("inp-adj-type").value;
+  const qty       = parseInt(document.getElementById("inp-adj-qty").value);
+  const reason    = document.getElementById("inp-adj-reason").value;
+  const note      = document.getElementById("inp-adj-note").value.trim();
+  const hasDamage = document.getElementById("inp-adj-has-damage").checked;
+  if (!branchId || !productId || !qty) { alert("Fill all fields"); return; }
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  const stockId = branchId + "_" + productId;
+  const ref = FS.doc(db, "stock", stockId);
+  const snap = await FS.getDoc(ref);
+
+  // Net qty to add to stock = received qty minus damaged qty
+  let dmgQty = 0;
+  if (hasDamage) {
+    dmgQty = parseInt(document.getElementById("inp-adj-dmg-qty").value) || 0;
+  }
+  const netQty = Math.max(0, qty - dmgQty);
+
+  if (snap.exists()) {
+    if (type === "set") {
+      await FS.updateDoc(ref, { quantity: netQty, updatedAt: FS.serverTimestamp() });
+    } else {
+      const delta = type === "add" ? netQty : -netQty;
+      await FS.updateDoc(ref, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp() });
+    }
+  } else {
+    await FS.setDoc(ref, { branchId, productId, quantity: netQty, updatedAt: FS.serverTimestamp() });
+  }
+
+  // Save stock movement record
+  const movementRef = await FS.addDoc(FS.collection(db, "stockMovements"), {
+    type: type === "add" ? "receipt" : "adjustment",
+    branchId, productId,
+    quantity: qty,
+    netQuantity: netQty,
+    reason, note,
+    hasDamage,
+    damagedQuantity: dmgQty,
+    createdBy: window.CURRENT_USER.uid,
+    createdAt: FS.serverTimestamp()
+  });
+
+  // If damage reported, also save a damage record linked to this stock-up
+  if (hasDamage && dmgQty > 0) {
+    const dmgReason  = document.getElementById("inp-adj-dmg-reason").value;
+    const dmgNote    = document.getElementById("inp-adj-dmg-note").value.trim();
+    const spillCount = parseInt(document.getElementById("inp-adj-dmg-spill").value) || 0;
+    const missCount  = parseInt(document.getElementById("inp-adj-dmg-missing").value) || 0;
+    const pkgDamage  = document.getElementById("inp-adj-dmg-pkg").checked;
+    await FS.addDoc(FS.collection(db, "damagedStock"), {
+      branchId, productId,
+      quantity: dmgQty,
+      reason: dmgReason,
+      note: dmgNote,
+      spillingItems: spillCount,
+      missingItems: missCount,
+      packagingDamaged: pkgDamage,
+      linkedStockMovement: movementRef.id,
+      reportedDuringStockUp: true,
+      reportedBy: window.CURRENT_USER.uid,
+      createdAt: FS.serverTimestamp()
+    });
+    // Notify CEO
+    await FS.addDoc(FS.collection(db, "notifications"), {
+      type: "damage",
+      title: "Damaged stock during receipt",
+      description: dmgQty + " cases damaged · " + dmgReason,
+      branchId, isRead: false, targetRole: "ceo",
+      createdAt: FS.serverTimestamp()
+    });
+  }
+
+  closeModal("modal-adjustment");
+  // Reset damage section
+  document.getElementById("inp-adj-has-damage").checked = false;
+  document.getElementById("stock-damage-section").style.display = "none";
+  loadStock();
+  setLoading(false);
+};
+
+window.toggleStockDamageSection = () => {
+  const chk = document.getElementById("inp-adj-has-damage");
+  const sec = document.getElementById("stock-damage-section");
+  // Small delay so checkbox state updates first
+  setTimeout(() => {
+    sec.style.display = chk.checked ? "block" : "none";
+  }, 10);
+};
+
+window.loadOrders = async () => {
+  const u = window.CURRENT_USER;
+  const snaps = await getDocs(query(collection(db, "orders"), orderBy("createdAt","desc"), limit(50)));
+  const list = [];
+  snaps.forEach(d => {
+    const data = d.data();
+    if (u.role === "ceo" || data.branchId === u.branchId) list.push({ id: d.id, ...data });
+  });
+  renderOrders(list);
+};
+
+// CEO sets product prices per branch
+window.getProductPrices = async (productId, branchId) => {
+  const db = window.DB; const FS = window.FS;
+  const snap = await FS.getDoc(FS.doc(db, "productPrices", branchId + "_" + productId));
+  if (snap.exists()) return { wholesale: snap.data().wholesalePrice || 0, retail: snap.data().retailPrice || 0 };
+  return { wholesale: 0, retail: 0 };
+};
+
+// Order items list (multiple products)
+window._orderItems = [];
+
+window.initOrderForm = async () => {
+  window._orderItems = [];
+  renderOrderItems();
+  document.getElementById("order-grand-total").textContent = "ETB 0.00";
+};
+
+window.addOrderItem = async () => {
+  const productId  = document.getElementById("inp-order-product").value;
+  const branchId   = document.getElementById("inp-order-branch").value;
+  const qty        = parseInt(document.getElementById("inp-order-qty").value) || 1;
+  const priceType  = document.getElementById("inp-order-price-type").value;
+  if (!productId || !branchId) { alert("Select branch and product first"); return; }
+  const prices = await getProductPrices(productId, branchId);
+  const price = priceType === "wholesale" ? prices.wholesale : prices.retail;
+  if (!price) { alert("No " + priceType + " price set for this product. Ask the CEO to set prices first."); return; }
+  const product = (window._products||[]).find(p => p.id === productId);
+  const subtotal = price * qty;
+  window._orderItems.push({ productId, productName: product ? product.name : productId, qty, price, priceType, subtotal });
+  renderOrderItems();
+  updateOrderTotal();
+  document.getElementById("inp-order-qty").value = 1;
+  document.getElementById("inp-order-product").value = "";
+  document.getElementById("inp-order-item-price").textContent = "";
+};
+
+window.removeOrderItem = (idx) => {
+  window._orderItems.splice(idx, 1);
+  renderOrderItems();
+  updateOrderTotal();
+};
+
+window.renderOrderItems = () => {
+  const container = document.getElementById("order-items-list");
+  if (!window._orderItems.length) {
+    container.innerHTML = '<div style="text-align:center;padding:10px;font-size:12px;color:#999">No items added yet</div>';
+    return;
+  }
+  container.innerHTML = window._orderItems.map((item, i) => {
+    const badge = item.priceType === "wholesale"
+      ? '<span style="background:#E6F1FB;color:#0C447C;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:500">Wholesale</span>'
+      : '<span style="background:#EAF3DE;color:#27500A;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:500">Retail</span>';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid #e5e5e0">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;margin-bottom:2px">${item.productName} ${badge}</div>
+        <div style="font-size:11px;color:#666">${item.qty} cases × ETB ${item.price.toLocaleString()} = <strong>ETB ${item.subtotal.toLocaleString()}</strong></div>
+      </div>
+      <button onclick="removeOrderItem(${i})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join("");
+};
+
+window.updateOrderTotal = () => {
+  const total = window._orderItems.reduce((sum, i) => sum + i.subtotal, 0);
+  document.getElementById("order-grand-total").textContent = "ETB " + total.toLocaleString();
+};
+
+window.onBranchOrProductChange = async () => {
+  const productId = document.getElementById("inp-order-product").value;
+  const branchId  = document.getElementById("inp-order-branch").value;
+  const priceEl   = document.getElementById("inp-order-item-price");
+  if (productId && branchId) {
+    const prices = await getProductPrices(productId, branchId);
+    if (prices.wholesale > 0 || prices.retail > 0) {
+      priceEl.innerHTML = `<span style="background:#E6F1FB;color:#0C447C;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:500;margin-right:4px">Wholesale: ETB ${prices.wholesale.toLocaleString()}</span><span style="background:#EAF3DE;color:#27500A;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:500">Retail: ETB ${prices.retail.toLocaleString()}</span>`;
+    } else {
+      priceEl.innerHTML = `<span style="color:#E24B4A;font-size:11px">⚠ No price set — ask CEO to set prices</span>`;
+    }
+  }
+};
+
+window.saveOrder = async () => {
+  const customerId     = document.getElementById("inp-order-customer").value;
+  const branchId       = document.getElementById("inp-order-branch").value;
+  const payment        = document.getElementById("inp-order-payment").value;
+  const partialAmount  = parseFloat(document.getElementById("inp-order-partial-amount")?.value) || 0;
+  if (!customerId || !branchId) { alert("Select customer and branch"); return; }
+  if (!window._orderItems.length) { alert("Add at least one product to the order"); return; }
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  const total = window._orderItems.reduce((sum, i) => sum + i.subtotal, 0);
+  let paidAmount = 0;
+  let paymentStatus = "unpaid";
+  let creditGiven = 0;
+  if (payment === "cash") { paidAmount = total; paymentStatus = "paid"; }
+  else if (payment === "credit") { paidAmount = 0; paymentStatus = "credit"; creditGiven = total; }
+  else if (payment === "partial") {
+    paidAmount = partialAmount; creditGiven = total - partialAmount;
+    paymentStatus = partialAmount > 0 ? "partial" : "credit";
+  } else if (payment === "bank") { paidAmount = total; paymentStatus = "paid"; }
+  const isWalkin = customerId === "walkin";
+  const orderRef = await FS.addDoc(FS.collection(db, "orders"), {
+    customerId: isWalkin ? "walkin" : customerId,
+    isWalkin,
+    branchId, paymentMethod: payment,
+    totalAmount: total, paidAmount,
+    creditGiven, paymentStatus,
+    status: "confirmed", createdBy: window.CURRENT_USER.uid,
+    itemCount: window._orderItems.length,
+    createdAt: FS.serverTimestamp(), updatedAt: FS.serverTimestamp()
+  });
+  for (const item of window._orderItems) {
+    await FS.addDoc(FS.collection(db, "orderItems"), { orderId: orderRef.id, productId: item.productId, quantity: item.qty, unitPrice: item.price, priceType: item.priceType, subtotal: item.subtotal, createdAt: FS.serverTimestamp() });
+    // 12. Auto-adjust stock
+    const stockId = branchId + "_" + item.productId;
+    const stockRef = FS.doc(db, "stock", stockId);
+    const stockSnap = await FS.getDoc(stockRef);
+    if (stockSnap.exists()) {
+      const newQty = Math.max(0, (stockSnap.data().quantity || 0) - item.qty);
+      await FS.updateDoc(stockRef, { quantity: newQty, updatedAt: FS.serverTimestamp() });
+    }
+  }
+  // Update customer credit if credit given
+  if (!isWalkin && creditGiven > 0) {
+    const cRef = FS.doc(db, "customers", customerId);
+    const cSnap = await FS.getDoc(cRef);
+    if (cSnap.exists()) {
+      await FS.updateDoc(cRef, { outstandingBalance: FS.increment(creditGiven) });
+    }
+    await FS.addDoc(FS.collection(db, "creditLog"), {
+      customerId, action: "given", amount: creditGiven,
+      note: "Credit from order", orderId: orderRef.id,
+      doneBy: window.CURRENT_USER.uid, branchId,
+      createdAt: FS.serverTimestamp()
+    });
+  }
+  await FS.addDoc(FS.collection(db, "notifications"), { type: "order", title: "New order — " + window._orderItems.length + " products", description: "ETB " + total.toLocaleString() + " · " + payment, branchId, referenceId: orderRef.id, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp() });
+  window._orderItems = [];
+  closeModal("modal-order");
+  loadOrders();
+  setLoading(false);
+};
+
+// Toggle partial payment field
+window.togglePartialPayment = () => {
+  const v = document.getElementById("inp-order-payment").value;
+  document.getElementById("partial-payment-field").style.display = v === "partial" ? "block" : "none";
+};
+
+// Toggle bank transfer field
+window.toggleBankField = () => {
+  const v = document.getElementById("inp-pay-method").value;
+  document.getElementById("bank-transfer-field").style.display = v === "bank_transfer" ? "block" : "none";
+};
+
+// Toggle damage spill/missing section
+document.addEventListener("change", (e) => {
+  if (e.target.id === "inp-dmg-reason") {
+    const v = e.target.value;
+    const show = ["spilling","missing_items","spilling_and_missing"].includes(v);
+    const sec = document.getElementById("dmg-spill-section");
+    if (sec) sec.style.display = show ? "block" : "none";
+  }
+});
+
+// Show handled by in payment modal
+window.addEventListener("load", () => {
+  const u = window.CURRENT_USER;
+  if (u) {
+    const el = document.getElementById("pay-handled-by");
+    if (el) el.textContent = u.fullName + " (" + u.role + ")";
+  }
+});
+
+window.loadCustomers = async () => {
+  const snaps = await getDocs(collection(db, "customers"));
+  const list = [];
+  snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  window._customers = list;
+  renderCustomers(list);
+  populateSelects();
+};
+
+window.saveCustomer = async () => {
+  const name  = document.getElementById("inp-cust-name").value.trim();
+  const phone = document.getElementById("inp-cust-phone").value.trim();
+  const lim   = parseFloat(document.getElementById("inp-cust-limit").value) || 0;
+  if (!name) { alert("Enter customer name"); return; }
+  setLoading(true);
+  await addDoc(collection(db, "customers"), { name, phone, creditLimit: lim, outstandingBalance: 0, isActive: true, createdAt: serverTimestamp() });
+  closeModal("modal-customer");
+  loadCustomers();
+  setLoading(false);
+};
+
+window.loadExpenses = async () => {
+  const u = window.CURRENT_USER;
+  const snaps = await getDocs(query(collection(db, "expenses"), orderBy("createdAt","desc"), limit(50)));
+  const list = [];
+  snaps.forEach(d => { const data = d.data(); if (u.role === "ceo" || data.branchId === u.branchId) list.push({ id: d.id, ...data }); });
+  renderExpenses(list);
+};
+
+window.saveExpense = async () => {
+  const branchId = document.getElementById("inp-exp-branch").value;
+  const category = document.getElementById("inp-exp-cat").value;
+  const amount   = parseFloat(document.getElementById("inp-exp-amount").value);
+  const note     = document.getElementById("inp-exp-note").value.trim();
+  if (!branchId || !amount) { alert("Fill all fields"); return; }
+  setLoading(true);
+  await addDoc(collection(db, "expenses"), { branchId, category, amount, description: note, recordedBy: window.CURRENT_USER.uid, createdAt: serverTimestamp() });
+  await addDoc(collection(db, "notifications"), { type: "expense", title: "Expense: " + category + " ETB " + amount, description: note, branchId, isRead: false, targetRole: "ceo", createdAt: serverTimestamp() });
+  closeModal("modal-expense");
+  loadExpenses();
+  setLoading(false);
+};
+
+window.saveTransfer = async () => {
+  const fromBranch = document.getElementById("inp-tr-from").value;
+  const toBranch   = document.getElementById("inp-tr-to").value;
+  const productId  = document.getElementById("inp-tr-product").value;
+  const qty        = parseInt(document.getElementById("inp-tr-qty").value);
+  if (!fromBranch || !toBranch || !productId || !qty) { alert("Fill all fields"); return; }
+  if (fromBranch === toBranch) { alert("From and To branch must be different"); return; }
+  setLoading(true);
+  await addDoc(collection(db, "transfers"), { fromBranchId: fromBranch, toBranchId: toBranch, productId, quantity: qty, status: "in_transit", createdBy: window.CURRENT_USER.uid, createdAt: serverTimestamp() });
+  await updateDoc(doc(db, "stock", fromBranch + "_" + productId), { quantity: increment(-qty), updatedAt: serverTimestamp() });
+  const toRef = doc(db, "stock", toBranch + "_" + productId);
+  const toSnap = await getDoc(toRef);
+  if (toSnap.exists()) { await updateDoc(toRef, { quantity: increment(qty), updatedAt: serverTimestamp() }); }
+  else { await setDoc(toRef, { branchId: toBranch, productId, quantity: qty, updatedAt: serverTimestamp() }); }
+  await addDoc(collection(db, "notifications"), { type: "transfer", title: "Stock transfer sent", description: qty + " units transferred", branchId: fromBranch, isRead: false, targetRole: "ceo", createdAt: serverTimestamp() });
+  closeModal("modal-transfer");
+  loadStock();
+  setLoading(false);
+};
+
+window.saveDamage = async () => {
+  const branchId  = document.getElementById("inp-dmg-branch").value;
+  const productId = document.getElementById("inp-dmg-product").value;
+  const qty       = parseInt(document.getElementById("inp-dmg-qty").value);
+  const reason    = document.getElementById("inp-dmg-reason").value;
+  const note      = document.getElementById("inp-dmg-note").value.trim();
+  if (!branchId || !productId || !qty) { alert("Fill all fields"); return; }
+  setLoading(true);
+  await addDoc(collection(db, "damagedStock"), { branchId, productId, quantity: qty, reason, note, reportedBy: window.CURRENT_USER.uid, createdAt: serverTimestamp() });
+  await updateDoc(doc(db, "stock", branchId + "_" + productId), { quantity: increment(-qty), updatedAt: serverTimestamp() });
+  await addDoc(collection(db, "notifications"), { type: "damage", title: "Damaged stock reported", description: qty + " units - " + reason, branchId, isRead: false, targetRole: "ceo", createdAt: serverTimestamp() });
+  closeModal("modal-damage");
+  loadStock();
+  setLoading(false);
+};
+
+window.loadNotifications = async () => {
+  const snaps = await getDocs(query(collection(db, "notifications"), orderBy("createdAt","desc"), limit(50)));
+  const list = [];
+  snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  renderNotifications(list);
+};
+
+window.markAllRead = async () => {
+  const snaps = await getDocs(query(collection(db,"notifications"), where("isRead","==",false)));
+  const batch = [];
+  snaps.forEach(d => batch.push(updateDoc(doc(db,"notifications",d.id), { isRead: true })));
+  await Promise.all(batch);
+  loadNotifications();
+};
+
+window.loadStaff = async () => {
+  const snaps = await getDocs(collection(db, "staff"));
+  const list = [];
+  snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  renderStaff(list);
+};
+
+window.startRealtimeListeners = () => {
+  onSnapshot(query(collection(db,"notifications"), where("isRead","==",false)), snap => {
+    const show = snap.size > 0 ? "block" : "none";
+    const dot = document.getElementById("notif-dot"); if (dot) dot.style.display = show;
+    const dot2 = document.getElementById("notif-dot-sb"); if (dot2) dot2.style.display = show;
+  });
+};
+
+window.savePayment = async () => {
+  const orderId    = document.getElementById("inp-pay-order").value.trim();
+  const customerId = document.getElementById("inp-pay-customer").value;
+  const branchId   = document.getElementById("inp-pay-branch").value;
+  const amount     = parseFloat(document.getElementById("inp-pay-amount").value);
+  const method     = document.getElementById("inp-pay-method").value;
+  if (!customerId || !amount || !branchId) { alert("Fill all fields"); return; }
+  setLoading(true);
+  await addDoc(collection(db, "payments"), { orderId: orderId || null, customerId, branchId, amount, method, receivedBy: window.CURRENT_USER.uid, createdAt: serverTimestamp() });
+  if (orderId) {
+    const oRef = doc(db, "orders", orderId);
+    const oSnap = await getDoc(oRef);
+    if (oSnap.exists()) {
+      const o = oSnap.data();
+      const newPaid = (o.paidAmount || 0) + amount;
+      const status  = newPaid >= o.totalAmount ? "paid" : "partial";
+      await updateDoc(oRef, { paidAmount: newPaid, paymentStatus: status, updatedAt: serverTimestamp() });
+    }
+  }
+  closeModal("modal-payment");
+  loadOrders();
+  setLoading(false);
+};
+</script>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#1a1a18;font-size:14px;min-height:100vh}
+:root{--brand:#1558B0;--brand-d:#0C447C;--brand-l:#E6F1FB}
+.app{display:flex;flex-direction:column;min-height:100vh}
+.topbar{height:56px;background:var(--brand);display:flex;align-items:center;padding:0 16px;gap:10px;position:sticky;top:0;z-index:100}
+.topbar-logo{font-weight:800;font-size:15px;color:#fff;flex:1;letter-spacing:-.3px}
+.topbar-sub{font-size:11px;color:#B5D4F4;font-weight:400}
+.notif-btn{position:relative;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.85);padding:6px}
+.notif-dot{position:absolute;top:4px;right:4px;width:8px;height:8px;background:#E24B4A;border-radius:50%;border:2px solid var(--brand);display:none}
+.user-chip{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.15);border-radius:20px;padding:4px 10px 4px 4px;border:0.5px solid rgba(255,255,255,.2);cursor:pointer}
+.user-avatar{width:26px;height:26px;border-radius:50%;background:#B5D4F4;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#0C447C}
+.user-role{font-size:11px;color:rgba(255,255,255,.85)}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;height:60px;background:#fff;border-top:0.5px solid #e5e5e0;display:flex;z-index:100}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;border:none;background:none;color:#888;font-size:10px;transition:color .15s}
+.nav-item.active{color:var(--brand)}
+.nav-item i{font-size:22px}
+.content{flex:1;padding:12px 12px 72px;overflow-y:auto}
+.page{display:none}.page.active{display:block}
+.card{background:#fff;border:0.5px solid #e5e5e0;border-radius:12px;padding:14px;margin-bottom:10px}
+.card-title{font-size:11px;color:#666;margin-bottom:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:500}
+.stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.stat-card{background:#f5f5f0;border-radius:8px;padding:12px}
+.stat-label{font-size:11px;color:#666;margin-bottom:4px}
+.stat-value{font-size:20px;font-weight:700}
+.stat-sub{font-size:11px;color:#888;margin-top:2px}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.tbl th{text-align:left;padding:6px;color:#666;font-weight:500;border-bottom:0.5px solid #e5e5e0;font-size:11px}
+.tbl td{padding:7px 6px;border-bottom:0.5px solid #e5e5e0;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500}
+.bg{background:#EAF3DE;color:#27500A}.br{background:#FCEBEB;color:#791F1F}
+.ba{background:#FAEEDA;color:#633806}.bb{background:#E6F1FB;color:#0C447C}
+.bgr{background:#F1EFE8;color:#444441}
+.credit-bar{height:6px;border-radius:3px;background:#f0f0eb;overflow:hidden;margin-top:4px}
+.credit-fill{height:100%;border-radius:3px}
+.cs{background:#1D9E75}.cw{background:#EF9F27}.cd{background:#E24B4A}
+.btn{padding:7px 14px;border-radius:8px;border:0.5px solid #ccc;background:#fff;color:#1a1a18;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:5px}
+.btn-primary{background:var(--brand);color:#fff;border-color:var(--brand-d)}
+.btn-sm{padding:4px 10px;font-size:12px}
+.sec-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.sec-title{font-size:15px;font-weight:700}
+.branch-card{background:#fff;border:0.5px solid #e5e5e0;border-radius:12px;padding:14px;margin-bottom:10px}
+.branch-name{font-size:15px;font-weight:700;margin-bottom:2px}
+.branch-meta{font-size:12px;color:#666;margin-bottom:10px}
+.branch-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.branch-stat{text-align:center;padding:8px 4px;background:#f5f5f0;border-radius:8px}
+.branch-stat-val{font-size:16px;font-weight:700;color:var(--brand)}
+.branch-stat-lbl{font-size:10px;color:#888;margin-top:2px}
+.notif-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:0.5px solid #e5e5e0}
+.notif-item:last-child{border-bottom:none}
+.ni{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px}
+.ni-order{background:#E6F1FB;color:#185FA5}.ni-transfer{background:#E1F5EE;color:#0F6E56}
+.ni-damage{background:#FCEBEB;color:#A32D2D}.ni-payment{background:#EAF3DE;color:#3B6D11}
+.ni-expense{background:#FAEEDA;color:#854F0B}.ni-stock{background:#FAEEDA;color:#854F0B}
+.notif-text{flex:1}
+.notif-title{font-size:13px;font-weight:500;margin-bottom:2px}
+.notif-desc{font-size:12px;color:#666}
+.notif-time{font-size:11px;color:#999;white-space:nowrap}
+.tab-bar{display:flex;gap:4px;background:#f5f5f0;border-radius:8px;padding:3px;margin-bottom:12px}
+.tab-btn{flex:1;padding:6px;border:none;background:none;border-radius:6px;font-size:12px;cursor:pointer;color:#666;font-weight:500;transition:all .15s}
+.tab-btn.active{background:#fff;color:#1a1a18}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center;padding:16px}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:12px;width:100%;max-width:360px;padding:18px;max-height:90vh;overflow-y:auto}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
+.form-field{margin-bottom:10px}
+.form-field label{font-size:12px;color:#666;display:block;margin-bottom:4px;font-weight:500}
+.form-field input,.form-field select,.form-field textarea{width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;color:#1a1a18;font-size:14px;font-family:inherit}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.login-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:#f5f5f0}
+.login-logo{font-size:28px;font-weight:900;color:var(--brand);margin-bottom:4px}
+.login-sub{font-size:13px;color:#666;margin-bottom:24px;text-align:center}
+.login-card{background:#fff;border-radius:12px;border:0.5px solid #e5e5e0;padding:22px;width:100%;max-width:340px}
+.login-btn{width:100%;padding:11px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px}
+.error-text{color:#E24B4A;font-size:12px;margin-top:6px;text-align:center;min-height:18px}
+.loader-overlay{display:none;position:fixed;inset:0;background:rgba(255,255,255,.6);z-index:999;align-items:center;justify-content:center}
+.loader-overlay.show{display:flex}
+.spinner{width:36px;height:36px;border:3px solid #e5e5e0;border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:32px 16px;color:#999;font-size:13px}
+.dmg-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid #e5e5e0}
+.dmg-item:last-child{border-bottom:none}
+.dmg-icon{width:34px;height:34px;border-radius:8px;background:#FCEBEB;display:flex;align-items:center;justify-content:center;color:#A32D2D;font-size:18px;flex-shrink:0}
+.calc-field{margin-bottom:10px}
+.calc-field label{font-size:12px;color:#666;display:block;margin-bottom:4px}
+.calc-field input,.calc-field select{width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;color:#1a1a18;font-size:14px}
+
+/* ══════════════════════════════════════════
+   THEME SYSTEM
+══════════════════════════════════════════ */
+:root {
+  --t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;
+  --t-brand-avatar-bg:#B5D4F4;--t-brand-avatar-text:#0C447C;
+  --t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.7);
+  --t-bg:#f5f5f0;--t-surface:#fff;--t-border:#e5e5e0;
+  --t-text:#1a1a18;--t-text2:#666;--t-text3:#999;
+  --t-stat-bg:#f5f5f0;--t-nav-bg:#fff;
+}
+
+/* Theme 1: Deep Blue (default) */
+[data-theme="blue"]{--t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;--t-brand-avatar-bg:#B5D4F4;--t-brand-avatar-text:#0C447C;--t-bg:#f5f5f0;--t-surface:#fff;--t-border:#e5e5e0;--t-text:#1a1a18;--t-text2:#666;--t-text3:#999;--t-stat-bg:#f5f5f0;--t-nav-bg:#fff;--t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.7)}
+/* Theme 2: Forest Green */
+[data-theme="green"]{--t-brand:#0F6E56;--t-brand-d:#085041;--t-brand-l:#E1F5EE;--t-brand-avatar-bg:#9FE1CB;--t-brand-avatar-text:#04342C;--t-bg:#f0f5f1;--t-surface:#fff;--t-border:#c8e0d0;--t-text:#1a1a18;--t-text2:#3B6D11;--t-text3:#888;--t-stat-bg:#f0f5f1;--t-nav-bg:#fff;--t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.7)}
+/* Theme 3: Dark Premium */
+[data-theme="dark"]{--t-brand:#378ADD;--t-brand-d:#185FA5;--t-brand-l:#0C447C;--t-brand-avatar-bg:#185FA5;--t-brand-avatar-text:#B5D4F4;--t-bg:#0f0f0f;--t-surface:#1a1a1a;--t-border:#2a2a2a;--t-text:#f0f0f0;--t-text2:#aaa;--t-text3:#666;--t-stat-bg:#1e1e1e;--t-nav-bg:#1a1a1a;--t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.5)}
+/* Theme 4: Warm Amber */
+[data-theme="amber"]{--t-brand:#854F0B;--t-brand-d:#633806;--t-brand-l:#FAEEDA;--t-brand-avatar-bg:#FAC775;--t-brand-avatar-text:#412402;--t-bg:#fdf8f0;--t-surface:#fff;--t-border:#edd8b0;--t-text:#1a1a18;--t-text2:#633806;--t-text3:#888;--t-stat-bg:#fdf8f0;--t-nav-bg:#fff;--t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.7)}
+/* Theme 5: Midnight Purple */
+[data-theme="purple"]{--t-brand:#3C3489;--t-brand-d:#26215C;--t-brand-l:#EEEDFE;--t-brand-avatar-bg:#CECBF6;--t-brand-avatar-text:#26215C;--t-bg:#f4f2fe;--t-surface:#fff;--t-border:#d0cdf5;--t-text:#1a1a18;--t-text2:#534AB7;--t-text3:#888;--t-stat-bg:#f4f2fe;--t-nav-bg:#fff;--t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.7)}
+/* Theme 6: Auto (follows system) */
+@media(prefers-color-scheme:dark){[data-theme="auto"]{--t-brand:#378ADD;--t-brand-d:#185FA5;--t-brand-l:#0C447C;--t-brand-avatar-bg:#185FA5;--t-brand-avatar-text:#B5D4F4;--t-bg:#0f0f0f;--t-surface:#1a1a1a;--t-border:#2a2a2a;--t-text:#f0f0f0;--t-text2:#aaa;--t-text3:#666;--t-stat-bg:#1e1e1e;--t-nav-bg:#1a1a1a;--t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.5)}}
+@media(prefers-color-scheme:light){[data-theme="auto"]{--t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;--t-brand-avatar-bg:#B5D4F4;--t-brand-avatar-text:#0C447C;--t-bg:#f5f5f0;--t-surface:#fff;--t-border:#e5e5e0;--t-text:#1a1a18;--t-text2:#666;--t-text3:#999;--t-stat-bg:#f5f5f0;--t-nav-bg:#fff;--t-topbar-text:#fff;--t-topbar-sub:rgba(255,255,255,.7)}}
+
+/* Apply theme vars to elements */
+body{background:var(--t-bg)!important;color:var(--t-text)!important}
+.topbar{background:var(--t-brand)!important}
+.topbar-sub{color:var(--t-topbar-sub)!important}
+.user-chip{background:rgba(255,255,255,.15)!important;border-color:rgba(255,255,255,.2)!important}
+.user-avatar{background:var(--t-brand-avatar-bg)!important;color:var(--t-brand-avatar-text)!important}
+.bottom-nav{background:var(--t-nav-bg)!important;border-top-color:var(--t-border)!important}
+.nav-item.active{color:var(--t-brand)!important}
+.card{background:var(--t-surface)!important;border-color:var(--t-border)!important;color:var(--t-text)!important}
+.card-title{color:var(--t-text2)!important}
+.stat-card{background:var(--t-stat-bg)!important}
+.stat-label{color:var(--t-text2)!important}
+.branch-card{background:var(--t-surface)!important;border-color:var(--t-border)!important}
+.tbl th{color:var(--t-text2)!important;border-bottom-color:var(--t-border)!important}
+.tbl td{border-bottom-color:var(--t-border)!important;color:var(--t-text)!important}
+.tab-bar{background:var(--t-stat-bg)!important}
+.tab-btn.active{background:var(--t-surface)!important;color:var(--t-text)!important}
+.tab-btn{color:var(--t-text2)!important}
+.modal{background:var(--t-surface)!important;color:var(--t-text)!important}
+.modal-title{color:var(--t-text)!important}
+.form-field label{color:var(--t-text2)!important}
+.form-field input,.form-field select,.form-field textarea{background:var(--t-surface)!important;color:var(--t-text)!important;border-color:var(--t-border)!important}
+.btn{background:var(--t-surface)!important;color:var(--t-text)!important;border-color:var(--t-border)!important}
+.btn-primary{background:var(--t-brand)!important;color:#fff!important;border-color:var(--t-brand-d)!important}
+.sec-title{color:var(--t-text)!important}
+.notif-title{color:var(--t-text)!important}
+.notif-desc{color:var(--t-text2)!important}
+.empty-state{color:var(--t-text3)!important}
+.credit-bar{background:var(--t-stat-bg)!important}
+.login-wrap{background:var(--t-bg)!important}
+.login-card{background:var(--t-surface)!important;border-color:var(--t-border)!important}
+.login-logo{color:var(--t-brand)!important}
+.login-sub{color:var(--t-text2)!important}
+.login-btn{background:var(--t-brand)!important;border-color:var(--t-brand-d)!important}
+.branch-stat{background:var(--t-stat-bg)!important}
+.branch-stat-val{color:var(--t-brand)!important}
+.calc-field input,.calc-field select{background:var(--t-surface)!important;color:var(--t-text)!important;border-color:var(--t-border)!important}
+
+/* Theme panel */
+.theme-panel{position:fixed;top:56px;right:8px;width:220px;background:var(--t-surface);border:0.5px solid var(--t-border);border-radius:var(--border-radius-lg,12px);z-index:150;box-shadow:0 4px 24px rgba(0,0,0,.12);display:none;overflow:hidden}
+.theme-panel.open{display:block}
+.theme-panel-title{font-size:11px;font-weight:600;color:var(--t-text2);text-transform:uppercase;letter-spacing:.6px;padding:10px 14px 6px;border-bottom:0.5px solid var(--t-border)}
+.theme-option{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:0.5px solid var(--t-border);transition:background .1s}
+.theme-option:last-child{border-bottom:none}
+.theme-option:hover{background:var(--t-stat-bg)}
+.theme-option.active{background:var(--t-brand-l)}
+.theme-swatch{width:28px;height:28px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px}
+.theme-opt-name{font-size:13px;font-weight:500;color:var(--t-text);flex:1}
+.theme-opt-sub{font-size:11px;color:var(--t-text2)}
+.theme-check{color:var(--t-brand);font-size:16px}
+.theme-btn{background:none;border:none;cursor:pointer;color:rgba(255,255,255,.85);padding:6px;position:relative}
+
+
+/* ===== SIDEBAR LAYOUT ===== */
+@media(min-width:769px){
+  .app{flex-direction:row}
+  .sidebar{display:flex;flex-direction:column;width:230px;min-height:100vh;background:var(--t-sidebar-bg,var(--t-topbar-bg));border-right:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15));flex-shrink:0}
+  .sidebar-brand{padding:18px 16px;font-weight:800;font-size:16px;color:var(--t-sidebar-text,#fff);display:flex;align-items:center;gap:8px;border-bottom:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15))}
+  .sidebar-brand .topbar-sub{display:block;font-size:11px;font-weight:400;color:var(--t-sidebar-text2,rgba(255,255,255,.7));margin-top:2px}
+  .sidebar-icons{display:flex;gap:6px;padding:10px 12px;border-bottom:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15))}
+  .sidebar-icons .notif-btn{color:var(--t-sidebar-text,#fff)!important}
+  .sidebar-nav{flex:1;padding:10px 8px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+  .sidebar .nav-item{flex-direction:row;justify-content:flex-start;gap:10px;padding:9px 12px;border-radius:8px;color:var(--t-sidebar-text2,rgba(255,255,255,.75));font-size:13px;height:auto}
+  .sidebar .nav-item i{font-size:18px}
+  .sidebar .nav-item.active{background:var(--t-sidebar-active,rgba(255,255,255,.15));color:var(--t-sidebar-text,#fff)!important}
+  .sidebar .nav-item:hover{background:var(--t-sidebar-active,rgba(255,255,255,.1))}
+  .sidebar-user{padding:12px;border-top:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15));display:flex;align-items:center;gap:10px}
+  .sidebar-user .user-avatar{width:32px;height:32px}
+  .sidebar-user-info{flex:1;min-width:0}
+  .sidebar-user-name{font-size:12px;font-weight:600;color:var(--t-sidebar-text,#fff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sidebar-user-role{font-size:11px;color:var(--t-sidebar-text2,rgba(255,255,255,.7))}
+  .sidebar-logout{background:none;border:none;color:var(--t-sidebar-text2,rgba(255,255,255,.7));cursor:pointer;font-size:16px;padding:4px}
+  .sidebar-logout:hover{color:var(--t-sidebar-text,#fff)}
+  /* hide mobile topbar + bottom nav on desktop */
+  .topbar{display:none!important}
+  .bottom-nav{display:none!important}
+  .content{flex:1;min-width:0}
+  .dash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+}
+@media(max-width:768px){
+  .sidebar{display:none}
+}
+/* ===== DASHBOARD CARDS (all sizes) ===== */
+.dash-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:10px}
+.dash-card{background:var(--t-surface,#fff);border:0.5px solid var(--t-border,#e5e5e0);border-radius:12px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:box-shadow .15s,transform .15s}
+.dash-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
+.dash-card-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;background:var(--t-brand-l,#E6F1FB);color:var(--t-brand,#1558B0)}
+.dash-card-label{font-size:12px;color:var(--t-text2,#666);font-weight:500}
+.dash-card-value{font-size:22px;font-weight:800;color:var(--t-text,#1a1a18)}
+.dash-card-sub{font-size:11px;color:var(--t-text3,#999)}
+</style>
+
+<style>
+.theme-picker-overlay{display:none;position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.4)}
+.theme-picker-overlay.open{display:block}
+.theme-picker-panel{position:fixed;top:56px;right:0;width:min(320px,100vw);max-height:calc(100vh - 56px);background:var(--color-background-primary);border-left:0.5px solid var(--color-border-tertiary);border-bottom:0.5px solid var(--color-border-tertiary);border-radius:0 0 0 var(--border-radius-lg);overflow-y:auto;z-index:301;display:none;padding-bottom:16px}
+.theme-picker-panel.open{display:block}
+.tp-header{padding:14px 16px 10px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between}
+.tp-title{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+.tp-close{background:none;border:none;cursor:pointer;color:var(--color-text-secondary);font-size:20px;padding:2px}
+.tp-item{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:0.5px solid var(--color-border-tertiary);transition:background .1s}
+.tp-item:hover{background:var(--color-background-secondary)}
+.tp-item.active{background:var(--color-background-secondary)}
+.tp-preview{width:44px;height:44px;border-radius:8px;flex-shrink:0;overflow:hidden;border:0.5px solid var(--color-border-tertiary)}
+.tp-preview-bar{height:14px}
+.tp-preview-body{height:30px;display:flex;gap:3px;padding:4px}
+.tp-preview-card{flex:1;border-radius:3px}
+.tp-info{flex:1}
+.tp-name{font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:2px}
+.tp-desc{font-size:11px;color:var(--color-text-secondary);line-height:1.4}
+.tp-check{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px}
+.tp-check.on{background:#1D9E75;color:#fff}
+.tp-check.off{background:var(--color-background-secondary);color:var(--color-border-secondary)}
+
+/* ── THEMES ── */
+body.theme-blue{--t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;--t-topbar-bg:#1558B0;--t-topbar-text:#fff;--t-topbar-sub:#B5D4F4;--t-avatar-bg:#B5D4F4;--t-avatar-color:#0C447C;--t-nav-active:#1558B0;--t-accent:#E6F1FB}
+body.theme-white{--t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;--t-topbar-bg:#fff;--t-topbar-text:#1a1a18;--t-topbar-sub:#888;--t-avatar-bg:#E6F1FB;--t-avatar-color:#1558B0;--t-nav-active:#1558B0;--t-accent:#E6F1FB;--t-sidebar-bg:#fff;--t-sidebar-text:#1a1a18;--t-sidebar-text2:#666;--t-sidebar-active:#E6F1FB;--t-sidebar-border:#e5e5e0}
+body.theme-green{--t-brand:#0F6E56;--t-brand-d:#085041;--t-brand-l:#E1F5EE;--t-topbar-bg:#0F6E56;--t-topbar-text:#fff;--t-topbar-sub:#9FE1CB;--t-avatar-bg:#9FE1CB;--t-avatar-color:#04342C;--t-nav-active:#0F6E56;--t-accent:#E1F5EE;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
+body.theme-dark{--t-brand:#378ADD;--t-brand-d:#185FA5;--t-brand-l:#0C447C;--t-topbar-bg:#111;--t-topbar-text:#fff;--t-topbar-sub:#555;--t-avatar-bg:#185FA5;--t-avatar-color:#B5D4F4;--t-nav-active:#378ADD;--t-accent:#1e1e1e;color-scheme:dark;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
+body.theme-amber{--t-brand:#854F0B;--t-brand-d:#633806;--t-brand-l:#FAEEDA;--t-topbar-bg:#854F0B;--t-topbar-text:#fff;--t-topbar-sub:#FAC775;--t-avatar-bg:#FAC775;--t-avatar-color:#412402;--t-nav-active:#854F0B;--t-accent:#FAEEDA;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
+body.theme-purple{--t-brand:#3C3489;--t-brand-d:#26215C;--t-brand-l:#EEEDFE;--t-topbar-bg:#3C3489;--t-topbar-text:#fff;--t-topbar-sub:#CECBF6;--t-avatar-bg:#CECBF6;--t-avatar-color:#26215C;--t-nav-active:#534AB7;--t-accent:#EEEDFE;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
+body.theme-auto{--t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;--t-topbar-bg:#1558B0;--t-topbar-text:#fff;--t-topbar-sub:#B5D4F4;--t-avatar-bg:#B5D4F4;--t-avatar-color:#0C447C;--t-nav-active:#1558B0;--t-accent:#E6F1FB;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
+@media(prefers-color-scheme:dark){body.theme-auto{--t-brand:#378ADD;--t-topbar-bg:#111;--t-topbar-text:#fff;--t-topbar-sub:#555;--t-avatar-bg:#185FA5;--t-avatar-color:#B5D4F4;--t-nav-active:#378ADD;color-scheme:dark;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}}
+body.theme-dark,.theme-dark .card,.theme-dark .modal,.theme-dark .bottom-nav,.theme-dark .topbar,.theme-dark .branch-card,.theme-dark .login-card{background-color:#111 !important;border-color:#333 !important;color:#eee !important}
+body.theme-dark .stat-card,.theme-dark .tab-bar,.theme-dark .calc-field input,.theme-dark .calc-field select,.theme-dark .form-field input,.theme-dark .form-field select,.theme-dark .form-field textarea{background:#1e1e1e !important;border-color:#333 !important;color:#eee !important}
+body.theme-dark .stat-label,.theme-dark .card-title,.theme-dark .notif-desc,.theme-dark .branch-meta,.theme-dark .notif-time,.theme-dark .tab-btn{color:#888 !important}
+body.theme-dark .content{background:#0d0d0d !important}
+body.theme-dark .tbl th{color:#888 !important;border-color:#333 !important}
+body.theme-dark .tbl td{border-color:#333 !important;color:#eee !important}
+body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;color:#eee !important}
+
+/* Apply theme vars to topbar */
+.topbar{background:var(--t-topbar-bg,#1558B0) !important}
+.topbar-logo{color:var(--t-topbar-text,#fff) !important}
+.topbar-sub{color:var(--t-topbar-sub,#B5D4F4) !important}
+.notif-btn{color:var(--t-topbar-text,rgba(255,255,255,.85)) !important}
+.user-chip{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.2)}
+.user-avatar{background:var(--t-avatar-bg,#B5D4F4) !important;color:var(--t-avatar-color,#0C447C) !important}
+.nav-item.active{color:var(--t-nav-active,#1558B0) !important}
+.btn-primary{background:var(--t-brand,#1558B0) !important;border-color:var(--t-brand-d,#0C447C) !important}
+.login-btn{background:var(--t-brand,#1558B0) !important}
+.login-logo{color:var(--t-brand,#1558B0) !important}
+.stat-value{color:var(--color-text-primary)}
+.branch-stat-val{color:var(--t-brand,#1558B0) !important}
+.badge.bb{background:var(--t-accent,#E6F1FB) !important;color:var(--t-brand,#1558B0) !important}
+</style>
+</head>
+<body>
+<div class="loader-overlay" id="loader"><div class="spinner"></div></div>
+
+<div id="login-screen" class="login-wrap" style="display:none">
+  <div class="login-logo">&#9679; Oliyad Beverages</div>
+  <div class="login-sub">Wholesale Management System</div>
+  <div class="login-card">
+    <div class="form-field"><label>Email</label><input id="li-email" type="email" placeholder="your@email.com"></div>
+    <div class="form-field"><label>Password</label><input id="li-pass" type="password" placeholder="Password"></div>
+    <div id="li-error" class="error-text"></div>
+    <button class="login-btn" onclick="doLogin()"><i class="ti ti-login"></i> Sign In</button>
+  </div>
+</div>
+
+<div id="main-app" class="app" style="display:none">
+  <div class="topbar">
+    <div class="topbar-logo">&#9679; Oliyad Beverages <span class="topbar-sub" id="tb-branch"></span></div>
+    <button class="notif-btn" onclick="navTo('notif')" aria-label="Notifications"><i class="ti ti-bell" style="font-size:22px"></i><span class="notif-dot" id="notif-dot"></span></button>
+    <button class="notif-btn" onclick="toggleThemePicker()" aria-label="Change theme" id="theme-btn"><i class="ti ti-palette" style="font-size:22px"></i></button>
+    <div class="user-chip" onclick="navTo('users')">
+      <div class="user-avatar" id="tb-avatar">OA</div>
+      <div class="user-role" id="tb-role">CEO</div>
+    </div>
+  </div>
+
+  <!-- DESKTOP SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-brand">
+      <div>&#9679; Oliyad Beverages<span class="topbar-sub" id="sb-branch"></span></div>
+    </div>
+    <div class="sidebar-icons">
+      <button class="notif-btn" onclick="navTo('notif')" aria-label="Notifications"><i class="ti ti-bell" style="font-size:20px"></i><span class="notif-dot" id="notif-dot-sb"></span></button>
+      <button class="notif-btn" onclick="toggleThemePicker()" aria-label="Change theme"><i class="ti ti-palette" style="font-size:20px"></i></button>
+      <button class="notif-btn" onclick="navTo('users')" aria-label="Staff and settings"><i class="ti ti-settings" style="font-size:20px"></i></button>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-nav="dashboard" onclick="navTo('dashboard')"><i class="ti ti-layout-dashboard"></i>Dashboard</button>
+      <button class="nav-item" data-nav="branches" onclick="navTo('branches')"><i class="ti ti-building-store"></i>Branches</button>
+      <button class="nav-item" data-nav="stock" onclick="navTo('stock')"><i class="ti ti-box"></i>Products & Stock</button>
+      <button class="nav-item" data-nav="orders" onclick="navTo('orders')"><i class="ti ti-file-invoice"></i>Orders</button>
+      <button class="nav-item" data-nav="calc" onclick="navTo('calc')"><i class="ti ti-calculator"></i>Price Calculator</button>
+      <button class="nav-item" data-nav="more" onclick="navTo('more')"><i class="ti ti-dots"></i>More</button>
+    </nav>
+    <div class="sidebar-user" onclick="navTo('users')" style="cursor:pointer">
+      <div class="user-avatar" id="sb-avatar">OA</div>
+      <div class="sidebar-user-info">
+        <div class="sidebar-user-name" id="sb-name">User</div>
+        <div class="sidebar-user-role" id="sb-role">CEO</div>
+      </div>
+      <button class="sidebar-logout" onclick="event.stopPropagation();doLogout()" aria-label="Sign out"><i class="ti ti-logout"></i></button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="page active" id="page-dashboard">
+      <div class="page-title" style="font-size:18px;font-weight:700;margin-bottom:14px">Welcome back, <span id="dash-welcome">there</span>!</div>
+
+      <div class="dash-grid">
+        <div class="dash-card" onclick="navTo('orders')">
+          <div class="dash-card-icon"><i class="ti ti-receipt"></i></div>
+          <div class="dash-card-label">Sales</div>
+          <div class="dash-card-value" id="dash-orders">—</div>
+          <div class="dash-card-sub">Orders today</div>
+        </div>
+        <div class="dash-card" onclick="navTo('stock')">
+          <div class="dash-card-icon"><i class="ti ti-box"></i></div>
+          <div class="dash-card-label">Inventory</div>
+          <div class="dash-card-value" id="dash-lowstock" style="color:#E24B4A">—</div>
+          <div class="dash-card-sub">Low stock items</div>
+        </div>
+        <div class="dash-card" onclick="navTo('orders')">
+          <div class="dash-card-icon"><i class="ti ti-alert-circle"></i></div>
+          <div class="dash-card-label">Unpaid Orders</div>
+          <div class="dash-card-value" id="dash-unpaid" style="color:#E24B4A">—</div>
+          <div class="dash-card-sub">Awaiting payment</div>
+        </div>
+        <div class="dash-card" onclick="navTo('orders')">
+          <div class="dash-card-icon"><i class="ti ti-users"></i></div>
+          <div class="dash-card-label">Customers</div>
+          <div class="dash-card-value" id="dash-customers">—</div>
+          <div class="dash-card-sub">Total customers</div>
+        </div>
+        <div class="dash-card" onclick="openCreditMgmt()">
+          <div class="dash-card-icon"><i class="ti ti-credit-card"></i></div>
+          <div class="dash-card-label">Manage Credit</div>
+          <div class="dash-card-value" style="font-size:14px">Open</div>
+          <div class="dash-card-sub">Arrest, adjust, set limits</div>
+        </div>
+        <div class="dash-card" onclick="navTo('users')">
+          <div class="dash-card-icon"><i class="ti ti-wifi"></i></div>
+          <div class="dash-card-label">Online Now</div>
+          <div class="dash-card-value" id="dash-online-count" style="font-size:22px">—</div>
+          <div class="dash-card-sub">Staff online</div>
+        </div>
+      </div>
+
+      <div class="card"><div class="card-title">Recent Activity</div><div id="dash-activity"><div class="empty-state">Loading…</div></div></div>
+    </div>
+
+    <div class="page" id="page-branches">
+      <div class="sec-header"><div class="sec-title">Branches</div><button class="btn btn-primary btn-sm" onclick="openModal('modal-branch')"><i class="ti ti-plus"></i> Add</button></div>
+      <div id="branches-list"><div class="empty-state">Loading…</div></div>
+    </div>
+
+    <div class="page" id="page-stock">
+      <div class="sec-header"><div class="sec-title">Products & Stock</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="fixBrandsAutomatically()" style="color:#1D9E75;border-color:#97C459"><i class="ti ti-wand"></i> Fix Brands</button><button class="btn btn-sm" onclick="openModal('modal-set-price');loadPricesList()"><i class="ti ti-tag"></i> Set Prices</button></div></div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab(this,'tab-products')">Products</button>
+        <button class="tab-btn" onclick="switchTab(this,'tab-stock')">Stock</button>
+        <button class="tab-btn" onclick="switchTab(this,'tab-movement')">Movement</button>
+      </div>
+      <div id="tab-products"><div class="empty-state">Loading…</div></div>
+      <div id="tab-stock" style="display:none"><div class="empty-state">Loading…</div></div>
+      <div id="tab-movement" style="display:none"><div class="empty-state">Loading…</div></div>
+    </div>
+
+    <div class="page" id="page-orders">
+      <div class="sec-header"><div class="sec-title">Orders</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="openCreditMgmt()"><i class="ti ti-credit-card"></i> Credit</button><button class="btn btn-primary btn-sm" onclick="openModal('modal-order')"><i class="ti ti-plus"></i> New Order</button></div></div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab(this,'tab-orders-list')">Orders</button>
+        <button class="tab-btn" onclick="switchTab(this,'tab-customers')">Customers</button>
+        <button class="tab-btn" onclick="switchTab(this,'tab-payments')">Payments</button>
+      </div>
+      <div id="tab-orders-list"><div class="empty-state">Loading…</div></div>
+      <div id="tab-customers" style="display:none"><div class="empty-state">Loading…</div></div>
+      <div id="tab-payments" style="display:none"><div class="empty-state">Loading…</div></div>
+    </div>
+
+    <div class="page" id="page-calc">
+      <div class="sec-header">
+        <div class="sec-title">Price Calculator</div>
+        <button class="btn btn-sm" onclick="clearCalc()"><i class="ti ti-trash"></i> Clear</button>
+      </div>
+
+      <!-- Branch + Type selectors -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+        <div class="calc-field" style="margin:0">
+          <label style="font-size:11px;color:#666;display:block;margin-bottom:3px">Branch</label>
+          <select id="calc-branch-sel" onchange="onCalcBranchChange()" style="width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;font-size:13px">
+            <option value="">Select branch…</option>
+          </select>
+        </div>
+        <div class="calc-field" style="margin:0">
+          <label style="font-size:11px;color:#666;display:block;margin-bottom:3px">Customer Type</label>
+          <select id="calc-price-type" onchange="onCalcProductChange()" style="width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;font-size:13px">
+            <option value="wholesale">Wholesaler</option>
+            <option value="retail">Retailer</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Add product row -->
+      <div style="background:#f5f5f0;border-radius:12px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:500;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Add Product</div>
+        <div class="calc-field" style="margin-bottom:6px">
+          <select id="calc-product-sel" onchange="onCalcProductChange()" style="width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;font-size:13px">
+            <option value="">Select product…</option>
+          </select>
+        </div>
+        <div id="calc-price-display" style="font-size:12px;margin-bottom:6px;min-height:16px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:11px;color:#666;display:block;margin-bottom:3px">Qty (cases)</label>
+            <input type="number" id="calc-qty-inp" value="1" min="1" style="width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;font-size:14px">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary" style="width:100%;height:38px" onclick="addCalcItem()"><i class="ti ti-plus"></i> Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Items list -->
+      <div style="background:#fff;border:0.5px solid #e5e5e0;border-radius:12px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:500;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Items</div>
+        <div id="calc-items-list"><div style="text-align:center;padding:16px;font-size:12px;color:#999">No items added yet</div></div>
+        <div style="border-top:0.5px solid #e5e5e0;padding-top:10px;margin-top:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px;color:#666">Total Items</span>
+            <span id="calc-total-items" style="font-size:13px;font-weight:500">0 cases</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+            <span style="font-size:15px;font-weight:700">Grand Total</span>
+            <span id="calc-grand-total" style="font-size:28px;font-weight:900;color:var(--brand)">ETB 0</span>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%" onclick="openModal('modal-order')">
+        <i class="ti ti-file-invoice"></i> Create Order from This Calculation
+      </button>
+    </div>
+
+    <div class="page" id="page-more">
+      <div class="sec-title" style="margin-bottom:12px">More</div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab(this,'tab-expenses')">Expenses</button>
+        <button class="tab-btn" onclick="switchTab(this,'tab-damage')">Damaged</button>
+        <button class="tab-btn" onclick="switchTab(this,'tab-transfer')">Transfer</button>
+      </div>
+      <div id="tab-expenses">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-sm" onclick="openModal('modal-expense')"><i class="ti ti-plus"></i> Add</button></div>
+        <div id="expenses-list"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="tab-damage" style="display:none">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-sm" onclick="openModal('modal-damage')"><i class="ti ti-plus"></i> Report</button></div>
+        <div class="card" id="damage-list"><div class="empty-state">Loading…</div></div>
+      </div>
+      <div id="tab-transfer" style="display:none">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-sm btn-primary" onclick="openModal('modal-transfer')"><i class="ti ti-transfer"></i> New</button></div>
+        <div id="transfer-list"><div class="empty-state">Loading…</div></div>
+      </div>
+    </div>
+
+    <div class="page" id="page-notif">
+      <div class="sec-header"><div class="sec-title">Notifications</div><button class="btn btn-sm" onclick="markAllRead()"><i class="ti ti-check"></i> Mark read</button></div>
+      <div class="card" id="notif-list"><div class="empty-state">Loading…</div></div>
+    </div>
+
+    <div class="page" id="page-users">
+      <div class="sec-header">
+        <div class="sec-title">Staff & Settings</div>
+        <button class="btn btn-sm" onclick="doLogout()"><i class="ti ti-logout"></i> Sign out</button>
+      </div>
+      <div class="card" id="staff-list"><div class="empty-state">Loading…</div></div>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-nav="dashboard" onclick="navTo('dashboard')"><i class="ti ti-layout-dashboard"></i>Dashboard</button>
+    <button class="nav-item" data-nav="branches" onclick="navTo('branches')"><i class="ti ti-building-store"></i>Branches</button>
+    <button class="nav-item" data-nav="stock" onclick="navTo('stock')"><i class="ti ti-box"></i>Stock</button>
+    <button class="nav-item" data-nav="orders" onclick="navTo('orders')"><i class="ti ti-file-invoice"></i>Orders</button>
+    <button class="nav-item" data-nav="calc" onclick="navTo('calc')"><i class="ti ti-calculator"></i>Calc</button>
+    <button class="nav-item" data-nav="more" onclick="navTo('more')"><i class="ti ti-dots"></i>More</button>
+  </nav>
+</div>
+
+<!-- MODALS -->
+<div class="modal-bg" id="modal-branch"><div class="modal">
+  <div class="modal-title">Add Branch <button onclick="closeModal('modal-branch')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-field"><label>Name</label><input id="inp-branch-name" type="text" placeholder="e.g. Hawassa Branch or Car Plate AA-12345"></div>
+  <div class="form-field"><label>Location / Route</label><input id="inp-branch-loc" type="text" placeholder="City / Area / Route"></div>
+  <div class="form-field"><label>Currency</label><select id="inp-branch-cur"><option value="ETB">ETB</option><option value="USD">USD</option></select></div>
+  <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f5f5f0;border-radius:8px;margin-bottom:10px">
+    <input type="checkbox" id="inp-branch-iscar" style="width:16px;height:16px">
+    <label for="inp-branch-iscar" style="font-size:13px;cursor:pointer"><i class="ti ti-truck" style="color:#1558B0"></i> This is a Branch</label>
+  </div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveBranch()"><i class="ti ti-check"></i> Save</button>
+</div></div>
+
+<div class="modal-bg" id="modal-product"><div class="modal">
+  <div class="modal-title">Add Product <button onclick="closeModal('modal-product')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-field"><label>Product Name</label><input id="inp-prod-name" type="text" placeholder="e.g. KK Mango 500ml"></div>
+  <div class="form-row">
+    <div class="form-field"><label>SKU</label><input id="inp-prod-sku" type="text" placeholder="KK-001"></div>
+    <div class="form-field"><label>Unit</label><input id="inp-prod-unit" type="text" placeholder="CASE/12"></div>
+  </div>
+  <div class="form-field"><label>Brand</label><input id="inp-prod-brand" type="text" placeholder="e.g. KK, Pepsi, Coca-Cola, Ambo"></div>
+  <div class="form-field"><label>Category</label><select id="inp-prod-cat"><option>Juice</option><option>Water</option><option>Soda</option><option>Other</option></select></div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveProduct()"><i class="ti ti-check"></i> Save Product</button>
+</div></div>
+
+<div class="modal-bg" id="modal-customer"><div class="modal">
+  <div class="modal-title">Add Customer <button onclick="closeModal('modal-customer')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-field"><label>Customer Name</label><input id="inp-cust-name" type="text" placeholder="e.g. Kebede Trading"></div>
+  <div class="form-field"><label>Phone</label><input id="inp-cust-phone" type="tel" placeholder="+251..."></div>
+  <div class="form-field"><label>Credit Limit (ETB)</label><input id="inp-cust-limit" type="number" placeholder="0"></div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveCustomer()"><i class="ti ti-check"></i> Save Customer</button>
+</div></div>
+
+<div class="modal-bg" id="modal-order"><div class="modal" style="max-width:400px">
+  <div class="modal-title">New Order <button onclick="closeModal('modal-order')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-row">
+    <div class="form-field"><label>Customer</label>
+      <select id="inp-order-customer">
+        <option value="">Select customer…</option>
+        <option value="walkin">👤 Walk-in / One-time Customer</option>
+      </select>
+    </div>
+    <div class="form-field"><label>Payment</label>
+      <select id="inp-order-payment" onchange="togglePartialPayment()">
+        <option value="cash">Cash</option>
+        <option value="bank">Bank</option>
+        <option value="credit">Full Credit</option>
+        <option value="partial">Half / Partial</option>
+      </select>
+    </div>
+  </div>
+  <div id="partial-payment-field" style="display:none">
+    <div class="form-field"><label>Amount Paid Now (ETB)</label><input id="inp-order-partial-amount" type="number" placeholder="0" style="border-color:#EF9F27"></div>
+    <div style="font-size:11px;color:#EF9F27;margin-bottom:8px">Remaining amount will be recorded as credit</div>
+  </div>
+  <div class="form-field"><label>Branch</label><select id="inp-order-branch" onchange="onBranchOrProductChange()"><option value="">Select branch…</option></select></div>
+
+  <div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-bottom:10px">
+    <div style="font-size:12px;font-weight:500;color:#666;margin-bottom:8px">ADD PRODUCTS</div>
+    <div class="form-field" style="margin-bottom:6px"><label>Product</label><select id="inp-order-product" onchange="onBranchOrProductChange()"><option value="">Select product…</option></select></div>
+    <div id="inp-order-item-price" style="font-size:12px;margin-bottom:6px;min-height:16px"></div>
+    <div class="form-field" style="margin-bottom:6px">
+      <label>Customer Type</label>
+      <select id="inp-order-price-type" style="width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;font-size:14px">
+        <option value="wholesale">Wholesaler Price</option>
+        <option value="retail">Retailer Price</option>
+      </select>
+    </div>
+    <div class="form-row" style="margin-bottom:6px">
+      <div class="form-field" style="margin-bottom:0"><label>Qty (cases)</label><input id="inp-order-qty" type="number" value="1" min="1"></div>
+      <div style="display:flex;align-items:flex-end;padding-bottom:0">
+        <button class="btn btn-primary" style="width:100%;height:38px" onclick="addOrderItem()"><i class="ti ti-plus"></i> Add</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="background:#fff;border:0.5px solid #e5e5e0;border-radius:8px;padding:10px;margin-bottom:10px;min-height:60px">
+    <div style="font-size:12px;font-weight:500;color:#666;margin-bottom:6px">ORDER ITEMS</div>
+    <div id="order-items-list"><div style="text-align:center;padding:10px;font-size:12px;color:#999">No items added yet</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:0.5px solid #e5e5e0">
+      <span style="font-size:13px;font-weight:700">Grand Total</span>
+      <span id="order-grand-total" style="font-size:18px;font-weight:800;color:#1558B0">ETB 0.00</span>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" style="width:100%" onclick="saveOrder()"><i class="ti ti-check"></i> Create Order</button>
+</div></div>
+
+<div class="modal-bg" id="modal-payment"><div class="modal">
+  <div class="modal-title">Record Payment <button onclick="closeModal('modal-payment')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-field"><label>Customer</label><select id="inp-pay-customer"><option value="">Select…</option></select></div>
+  <div class="form-field"><label>Branch</label><select id="inp-pay-branch"><option value="">Select branch…</option></select></div>
+  <div class="form-field"><label>Order ID (optional)</label><input id="inp-pay-order" type="text" placeholder="Leave blank for general payment"></div>
+  <div class="form-row">
+    <div class="form-field"><label>Amount (ETB)</label><input id="inp-pay-amount" type="number" placeholder="0"></div>
+    <div class="form-field"><label>Method</label>
+      <select id="inp-pay-method" onchange="toggleBankField()">
+        <option value="cash">Cash</option>
+        <option value="bank_transfer">Bank Transfer</option>
+        <option value="mobile_money">Mobile Money</option>
+      </select>
+    </div>
+  </div>
+  <div id="bank-transfer-field" style="display:none">
+    <div class="form-field"><label>Bank Transfer To (name)</label><input id="inp-pay-transfer-to" type="text" placeholder="e.g. CEO Oliyad, Manager Meron…"></div>
+  </div>
+  <div style="background:#f5f5f0;border-radius:8px;padding:8px 10px;font-size:12px;color:#666;margin-bottom:8px">
+    <i class="ti ti-user" style="font-size:13px"></i> Transaction handled by: <strong id="pay-handled-by">—</strong>
+  </div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="savePayment()"><i class="ti ti-check"></i> Confirm Payment</button>
+</div></div>
+
+<div class="modal-bg" id="modal-expense"><div class="modal">
+  <div class="modal-title">Add Expense <button onclick="closeModal('modal-expense')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-row">
+    <div class="form-field"><label>Branch</label><select id="inp-exp-branch"><option value="">Select…</option></select></div>
+    <div class="form-field"><label>Category</label><select id="inp-exp-cat"><option value="fuel">Fuel</option><option value="rent">Rent</option><option value="salary">Salary</option><option value="utilities">Utilities</option><option value="other">Other</option></select></div>
+  </div>
+  <div class="form-field"><label>Amount (ETB)</label><input id="inp-exp-amount" type="number" placeholder="0"></div>
+  <div class="form-field"><label>Note</label><input id="inp-exp-note" type="text" placeholder="Optional"></div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveExpense()"><i class="ti ti-check"></i> Save Expense</button>
+</div></div>
+
+<div class="modal-bg" id="modal-damage"><div class="modal">
+  <div class="modal-title">Report Damage / Loss <button onclick="closeModal('modal-damage')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-row">
+    <div class="form-field"><label>Branch</label><select id="inp-dmg-branch"><option value="">Select…</option></select></div>
+    <div class="form-field"><label>Product</label><select id="inp-dmg-product"><option value="">Select…</option></select></div>
+  </div>
+  <div class="form-row">
+    <div class="form-field"><label>Cases Lost/Damaged</label><input id="inp-dmg-qty" type="number" placeholder="0" min="0"></div>
+    <div class="form-field"><label>Main Reason</label>
+      <select id="inp-dmg-reason">
+        <option value="spilling">Spilling (liquid leaking)</option>
+        <option value="missing_items">Missing items from package</option>
+        <option value="packaging_damaged">Packaging damaged (plastic/cardboard)</option>
+        <option value="spilling_and_missing">Spilling + Missing items</option>
+        <option value="expired">Expired</option>
+        <option value="lost">Lost</option>
+        <option value="theft">Theft</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+  </div>
+  <div id="dmg-spill-section" style="display:none">
+    <div class="form-row">
+      <div class="form-field"><label>Spilling items per case</label><input id="inp-dmg-spill-count" type="number" placeholder="0" min="0"></div>
+      <div class="form-field"><label>Missing items per case</label><input id="inp-dmg-missing-count" type="number" placeholder="0" min="0"></div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f5f5f0;border-radius:8px">
+    <input type="checkbox" id="inp-dmg-pkg" style="width:16px;height:16px">
+    <label for="inp-dmg-pkg" style="font-size:13px;cursor:pointer">Plastic / Cardboard packaging also damaged</label>
+  </div>
+  <div class="form-field"><label>Notes</label><textarea id="inp-dmg-note" rows="2" placeholder="Describe what happened in detail"></textarea></div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveDamage()"><i class="ti ti-check"></i> Submit Report</button>
+</div></div>
+
+<div class="modal-bg" id="modal-transfer"><div class="modal">
+  <div class="modal-title">Stock Transfer <button onclick="closeModal('modal-transfer')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-row">
+    <div class="form-field"><label>From Branch</label><select id="inp-tr-from"><option value="">Select…</option></select></div>
+    <div class="form-field"><label>To Branch</label><select id="inp-tr-to"><option value="">Select…</option></select></div>
+  </div>
+  <div class="form-field"><label>Product</label><select id="inp-tr-product"><option value="">Select…</option></select></div>
+  <div class="form-field"><label>Quantity</label><input id="inp-tr-qty" type="number" placeholder="0"></div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveTransfer()"><i class="ti ti-check"></i> Send Transfer</button>
+</div></div>
+
+<div class="modal-bg" id="modal-adjustment"><div class="modal" style="max-width:400px">
+  <div class="modal-title">Stock Up / Adjustment <button onclick="closeModal('modal-adjustment')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+
+  <div style="background:var(--color-background-secondary);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--color-text-secondary)">
+    <i class="ti ti-info-circle" style="font-size:14px;vertical-align:-2px" aria-hidden="true"></i>
+    Fill this form when receiving stock from factory or transferring between branches.
+  </div>
+
+  <div class="form-field"><label>Branch</label><select id="inp-adj-branch"><option value="">Select…</option></select></div>
+  <div class="form-field"><label>Product</label><select id="inp-adj-product"><option value="">Select…</option></select></div>
+  <div class="form-row">
+    <div class="form-field"><label>Type</label>
+      <select id="inp-adj-type">
+        <option value="add">Add Stock (Receipt)</option>
+        <option value="remove">Remove Stock</option>
+        <option value="set">Set Exact Count</option>
+      </select>
+    </div>
+    <div class="form-field"><label>Quantity (cases)</label><input id="inp-adj-qty" type="number" placeholder="0" min="0"></div>
+  </div>
+  <div class="form-field"><label>Source / Reason</label>
+    <select id="inp-adj-reason">
+      <option value="factory_receipt">Received from Factory</option>
+      <option value="branch_transfer">Received from Branch</option>
+      <option value="return">Customer Return</option>
+      <option value="physical_count">Physical Count Correction</option>
+      <option value="opening_stock">Opening Stock</option>
+      <option value="other">Other</option>
+    </select>
+  </div>
+  <div class="form-field"><label>Note (optional)</label><input id="inp-adj-note" type="text" placeholder="e.g. Supplier name, batch info…"></div>
+
+  <!-- DAMAGED GOODS TOGGLE -->
+  <div style="border:0.5px solid var(--color-border-secondary);border-radius:8px;overflow:hidden;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;background:var(--color-background-secondary)" onclick="toggleStockDamageSection()">
+      <input type="checkbox" id="inp-adj-has-damage" style="width:17px;height:17px;cursor:pointer" onclick="event.stopPropagation();toggleStockDamageSection()">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;color:var(--color-text-primary)"><i class="ti ti-alert-triangle" style="font-size:14px;color:#E24B4A;margin-right:4px" aria-hidden="true"></i>Damaged / Lost goods included</div>
+        <div style="font-size:11px;color:var(--color-text-secondary);margin-top:1px">Tick if any products arrived damaged, missing or lost in transit</div>
+      </div>
+    </div>
+
+    <!-- DAMAGE SECTION (hidden by default) -->
+    <div id="stock-damage-section" style="display:none;padding:12px;border-top:0.5px solid var(--color-border-tertiary)">
+      <div style="font-size:12px;font-weight:500;color:#E24B4A;margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px">Damage / Loss Report</div>
+      <div class="form-row">
+        <div class="form-field"><label>Damaged Qty (cases)</label><input id="inp-adj-dmg-qty" type="number" placeholder="0" min="0"></div>
+        <div class="form-field"><label>Reason</label>
+          <select id="inp-adj-dmg-reason">
+            <option value="spilling">Spilling (leaking)</option>
+            <option value="missing_items">Missing items</option>
+            <option value="packaging_damaged">Packaging damaged</option>
+            <option value="spilling_and_missing">Spilling + Missing</option>
+            <option value="transit_damage">Transit damage</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div id="adj-spill-section">
+        <div class="form-row">
+          <div class="form-field"><label>Spilling items/case</label><input id="inp-adj-dmg-spill" type="number" placeholder="0" min="0"></div>
+          <div class="form-field"><label>Missing items/case</label><input id="inp-adj-dmg-missing" type="number" placeholder="0" min="0"></div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--color-background-secondary);border-radius:6px;margin-bottom:8px">
+        <input type="checkbox" id="inp-adj-dmg-pkg" style="width:15px;height:15px">
+        <label for="inp-adj-dmg-pkg" style="font-size:12px;cursor:pointer">Plastic / Cardboard packaging damaged</label>
+      </div>
+      <div class="form-field"><label>Damage Notes</label><textarea id="inp-adj-dmg-note" rows="2" placeholder="Describe damage in detail…"></textarea></div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" style="width:100%" onclick="saveAdjustment()"><i class="ti ti-check"></i> Save Stock Record</button>
+</div></div>
+
+<script>
+function setLoading(v){ document.getElementById("loader").classList.toggle("show",v); }
+function showLogin(){ document.getElementById("login-screen").style.display="flex"; document.getElementById("main-app").style.display="none"; }
+function showApp(){
+  const u=window.CURRENT_USER;
+  document.getElementById("login-screen").style.display="none";
+  document.getElementById("main-app").style.display="flex";
+  document.getElementById("tb-role").textContent=u.role.charAt(0).toUpperCase()+u.role.slice(1);
+  document.getElementById("tb-branch").textContent=u.role==="ceo"?"· All Branches":"· "+(u.branchName||"");
+  const ini=u.fullName?u.fullName.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase():"OA";
+  document.getElementById("tb-avatar").textContent=ini;
+  const sbAv=document.getElementById("sb-avatar"); if(sbAv) sbAv.textContent=ini;
+  const sbName=document.getElementById("sb-name"); if(sbName) sbName.textContent=u.fullName||u.username||"User";
+  const sbRole=document.getElementById("sb-role"); if(sbRole) sbRole.textContent=u.role.charAt(0).toUpperCase()+u.role.slice(1);
+  const sbBranch=document.getElementById("sb-branch"); if(sbBranch) sbBranch.textContent=u.role==="ceo"?" · All Branches":" · "+(u.branchName||"");
+  const dw=document.getElementById("dash-welcome"); if(dw) dw.textContent=(u.fullName||u.username||"there").split(" ")[0];
+  populateSelects();
+  loadDashboard();
+  startRealtimeListeners();
+  startPresenceTracking();
+}
+function navTo(id){
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
+  document.getElementById("page-"+id).classList.add("active");
+  document.querySelectorAll('[data-nav="'+id+'"]').forEach(n=>n.classList.add("active"));
+  if(id==="dashboard") loadDashboard();
+  if(id==="branches") loadBranches();
+  if(id==="stock") loadProducts();
+  if(id==="orders"){ loadOrders(); loadCustomers(); }
+  if(id==="calc") populateCalcSelects();
+  if(id==="more"){ loadExpenses(); loadDamage(); loadTransfers(); }
+  if(id==="notif") loadNotifications();
+  if(id==="users") { if(window.CURRENT_USER && window.CURRENT_USER.role==="ceo") loadStaffWithPresence(); else loadStaff(); }
+}
+function switchTab(btn,tabId){
+  const parent=btn.closest(".tab-bar");
+  parent.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  let el=parent.nextElementSibling;
+  while(el){ if(el.id&&el.id.startsWith("tab-")) el.style.display=el.id===tabId?"block":"none"; el=el.nextElementSibling; }
+  if(tabId==="tab-stock") loadStock();
+  if(tabId==="tab-customers") loadCustomers();
+  if(tabId==="tab-payments") loadPayments();
+  if(tabId==="tab-movement") loadMovements();
+}
+function openModal(id){
+  document.getElementById(id).classList.add("open");
+  if(id==="modal-order") initOrderForm();
+  if(id==="modal-set-price"){
+    const branches=window._branches||[]; const products=window._products||[];
+    ["inp-price-branch"].forEach(sid=>{
+      const el=document.getElementById(sid); if(!el) return;
+      el.innerHTML='<option value="">Select branch…</option>';
+      branches.forEach(b=>{ const o=document.createElement("option"); o.value=b.id; o.textContent=b.name; el.appendChild(o); });
+    });
+    ["inp-price-product"].forEach(sid=>{
+      const el=document.getElementById(sid); if(!el) return;
+      el.innerHTML='<option value="">Select product…</option>';
+      products.forEach(p=>{ const o=document.createElement("option"); o.value=p.id; o.textContent=p.name; el.appendChild(o); });
+    });
+  }
+}
+function closeModal(id){ document.getElementById(id).classList.remove("open"); }
+document.querySelectorAll(".modal-bg").forEach(m=>{ m.addEventListener("click",e=>{ if(e.target===m) m.classList.remove("open"); }); });
+
+async function populateSelects(){
+  const db=window.DB; const FS=window.FS;
+  const [bSnap,pSnap,cSnap]=await Promise.all([FS.getDocs(FS.collection(db,"branches")),FS.getDocs(FS.collection(db,"products")),FS.getDocs(FS.collection(db,"customers"))]);
+  const branches=[],products=[],customers=[];
+  bSnap.forEach(d=>branches.push({id:d.id,...d.data()}));
+  pSnap.forEach(d=>products.push({id:d.id,...d.data()}));
+  cSnap.forEach(d=>customers.push({id:d.id,...d.data()}));
+  window._branches=branches; window._products=products; window._customers=customers;
+  ["inp-order-branch","inp-exp-branch","inp-dmg-branch","inp-tr-from","inp-tr-to","inp-adj-branch","inp-pay-branch"].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    el.innerHTML='<option value="">Select branch…</option>';
+    branches.forEach(b=>{ const o=document.createElement("option"); o.value=b.id; o.textContent=b.name; el.appendChild(o); });
+  });
+  ["inp-order-product","inp-dmg-product","inp-tr-product","inp-adj-product"].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    el.innerHTML='<option value="">Select product…</option>';
+    products.forEach(p=>{ const o=document.createElement("option"); o.value=p.id; o.textContent=p.name; el.appendChild(o); });
+  });
+  ["inp-order-customer","inp-pay-customer"].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    el.innerHTML='<option value="">Select customer…</option>';
+    customers.forEach(c=>{ const o=document.createElement("option"); o.value=c.id; o.textContent=c.name; el.appendChild(o); });
+  });
+}
+
+async function loadDashboard(){
+  const db=window.DB; const FS=window.FS; const u=window.CURRENT_USER;
+  try{
+    const [oSnap,sSnap,cSnap,nSnap]=await Promise.all([
+      FS.getDocs(FS.query(FS.collection(db,"orders"),FS.orderBy("createdAt","desc"),FS.limit(20))),
+      FS.getDocs(FS.collection(db,"stock")),
+      FS.getDocs(FS.collection(db,"customers")),
+      FS.getDocs(FS.query(FS.collection(db,"notifications"),FS.orderBy("createdAt","desc"),FS.limit(10)))
+    ]);
+    let orders=[],unpaid=0,lowStock=0;
+    oSnap.forEach(d=>{ const data=d.data(); if(u.role==="ceo"||data.branchId===u.branchId){ orders.push(data); if(data.paymentStatus!=="paid") unpaid++; } });
+    sSnap.forEach(d=>{ if(d.data().quantity<50) lowStock++; });
+    document.getElementById("dash-orders").textContent=orders.length;
+    document.getElementById("dash-unpaid").textContent=unpaid;
+    document.getElementById("dash-lowstock").textContent=lowStock;
+    document.getElementById("dash-customers").textContent=cSnap.size;
+    const typeIcon={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],low_stock:["ni-stock","ti-alert-triangle"]};
+    let html="";
+    nSnap.forEach(d=>{ const n=d.data(); const [cls,ico]=(typeIcon[n.type]||["ni-order","ti-file-invoice"]);
+      const t=n.createdAt&&n.createdAt.toDate?()=>{ const diff=Math.round((Date.now()-n.createdAt.toDate())/60000); return diff<60?diff+"m ago":Math.round(diff/60)+"h ago"; }:()=>"";
+      html+=`<div class="notif-item"><div class="ni ${cls}"><i class="ti ${ico}"></i></div><div class="notif-text"><div class="notif-title">${n.title}</div><div class="notif-desc">${n.description||""}</div></div><div class="notif-time">${t()}</div></div>`;
+    });
+    document.getElementById("dash-activity").innerHTML=html||'<div class="empty-state">No activity yet</div>';
+
+    // Load online count for CEO
+    if (u.role === "ceo") {
+      try {
+        const presSnaps = await FS.getDocs(FS.collection(db, "presence"));
+        let onlineCount = 0;
+        presSnaps.forEach(d => {
+          const p = d.data();
+          if (p.online && p.lastSeen) {
+            const last = p.lastSeen.toDate ? p.lastSeen.toDate() : new Date(p.lastSeen);
+            if ((Date.now() - last.getTime()) < 3 * 60 * 1000) onlineCount++;
+          }
+        });
+        const el = document.getElementById("dash-online-count");
+        if (el) el.textContent = onlineCount;
+      } catch(e) {}
+    }
+  }catch(e){ console.error(e); }
+}
+
+function renderBranches(list){
+  if(!list.length){ document.getElementById("branches-list").innerHTML='<div class="empty-state">No branches yet. Add one!</div>'; return; }
+  document.getElementById("branches-list").innerHTML=list.map(b=>{
+    const isCar = b.isCar || false;
+    const icon = isCar ? "ti-truck" : "ti-building-store";
+    const badge = '<span class="badge bg" style="font-size:10px">Branch</span>';
+    return `<div class="branch-card" onclick="openBranchDetail('${b.id}','${b.name}')" style="cursor:pointer">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="branch-name"><i class="ti ${icon}" style="font-size:16px;color:#1558B0;margin-right:6px"></i>${b.name}</div>
+        ${badge}
+      </div>
+      <div class="branch-meta"><i class="ti ti-map-pin" style="font-size:12px"></i> ${b.location} · ${b.currency}</div>
+      <div style="font-size:11px;color:#1558B0;margin-top:4px">Tap to view stock & credit →</div>
+    </div>`;
+  }).join("");
+}
+
+function renderProducts(list){
+  const container = document.getElementById("tab-products");
+
+  // Get unique brands sorted
+  const brands = [...new Set(list.map(p => p.brand || "Unbranded"))].sort();
+  const selected = window._selectedBrand && brands.includes(window._selectedBrand)
+    ? window._selectedBrand : (brands[0] || null);
+  window._selectedBrand = selected;
+
+  // Brand selector row
+  const brandRow = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-size:11px;color:#666;font-weight:500;white-space:nowrap">BRAND:</span>
+      ${brands.map(b => `
+        <div onclick="selectBrand('${b}')" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;cursor:pointer;border:1.5px solid ${b===selected?'#1558B0':'#e5e5e0'};background:${b===selected?'#1558B0':'#fff'};color:${b===selected?'#fff':'#666'};font-size:12px;font-weight:500;transition:all .15s">
+          <i class="ti ti-tag" style="font-size:14px"></i> ${b}
+        </div>`).join("")}
+      <div onclick="openModal('modal-add-brand')" style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:8px;cursor:pointer;border:1.5px dashed #85B7EB;background:#E6F1FB;color:#1558B0;font-size:12px;font-weight:500">
+        <i class="ti ti-plus" style="font-size:14px"></i> New Brand
+      </div>
+    </div>`;
+
+  if (!selected) {
+    container.innerHTML = brandRow + '<div class="empty-state">No products yet. Add a brand first.</div>';
+    return;
+  }
+
+  const filtered = list.filter(p => (p.brand || "Unbranded") === selected);
+
+  const productsHtml = filtered.length
+    ? `<div class="card" style="margin-bottom:8px"><table class="tbl">
+        <colgroup><col style="width:46%"><col style="width:22%"><col style="width:20%"><col style="width:12%"></colgroup>
+        <thead><tr><th>Product</th><th>SKU</th><th>Unit</th><th>Cat</th></tr></thead>
+        <tbody>${filtered.map(p=>`<tr><td><b>${p.name}</b></td><td style="font-size:11px">${p.sku}</td><td style="font-size:11px">${p.unit}</td><td style="font-size:11px">${p.category||"—"}</td></tr>`).join("")}</tbody>
+      </table></div>`
+    : `<div class="empty-state" style="margin-bottom:8px">No products under ${selected} yet</div>`;
+
+  const addBtn = `<button class="btn btn-primary" style="width:100%" onclick="openAddProductForBrand('${selected}')">
+    <i class="ti ti-plus"></i> Add Product under ${selected}
+  </button>`;
+
+  container.innerHTML = brandRow + productsHtml + addBtn;
+}
+
+window.openAddProductForBrand = (brand) => {
+  document.getElementById("inp-prod-brand").value = brand;
+  openModal("modal-product");
+};
+
+window.selectBrand = (brand) => {
+  window._selectedBrand = brand;
+  renderProducts(window._products || []);
+};
+
+function renderStock(list){
+  const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
+  const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
+  const btn='<button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="openModal(\'modal-adjustment\')"><i class="ti ti-adjustments"></i> Stock Adjustment</button>';
+  if(!list.length){ document.getElementById("tab-stock").innerHTML='<div class="empty-state">No stock records yet.</div>'+btn; return; }
+  document.getElementById("tab-stock").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:40%"><col style="width:35%"><col style="width:25%"></colgroup><thead><tr><th>Product</th><th>Branch</th><th>Qty</th></tr></thead><tbody>${list.map(s=>`<tr><td>${pMap[s.productId]||s.productId}</td><td>${bMap[s.branchId]||s.branchId}</td><td>${s.quantity<20?`<span style="color:#E24B4A;font-weight:700">${s.quantity}</span>`:s.quantity<50?`<span style="color:#EF9F27;font-weight:700">${s.quantity}</span>`:s.quantity}</td></tr>`).join("")}</tbody></table></div>`+btn;
+}
+
+function renderOrders(list){
+  const cMap={}; (window._customers||[]).forEach(c=>cMap[c.id]=c.name);
+  const sb={paid:"bg",unpaid:"ba",partial:"bb",credit:"br"};
+  if(!list.length){ document.getElementById("tab-orders-list").innerHTML='<div class="empty-state">No orders yet.</div>'; return; }
+  document.getElementById("tab-orders-list").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:36%"><col style="width:30%"><col style="width:20%"><col style="width:14%"></colgroup><thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th></tr></thead><tbody>${list.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); return `<tr><td><b>${cMap[o.customerId]||"—"}</b></td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span></td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+
+function renderCustomers(list){
+  const addBtn='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-primary btn-sm" onclick="openModal(\'modal-customer\')"><i class="ti ti-user-plus"></i> Add Customer</button></div>';
+  if(!list.length){ document.getElementById("tab-customers").innerHTML=addBtn+'<div class="empty-state">No customers yet.</div>'; return; }
+  document.getElementById("tab-customers").innerHTML=addBtn+'<div class="card">'+list.map(c=>{
+    const pct=c.creditLimit>0?Math.min(100,Math.round((c.outstandingBalance/c.creditLimit)*100)):0;
+    const cls=pct>=90?"cd":pct>=70?"cw":"cs";
+    const label=pct>=90?"Over limit!":pct>=70?"Warning":"Safe";
+    return `<div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0;cursor:pointer" onclick="openCustomerDetail('${c.id}','${c.name}')">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+        <span style="font-weight:500">${c.name}</span>
+        <span style="font-size:12px">ETB ${(c.outstandingBalance||0).toLocaleString()} / ${(c.creditLimit||0).toLocaleString()}</span>
+      </div>
+      <div style="font-size:11px;color:#666;margin-bottom:3px">${pct}% · ${label}${c.phone?' · '+c.phone:''}</div>
+      <div class="credit-bar"><div class="credit-fill ${cls}" style="width:${pct}%"></div></div>
+      <div style="font-size:11px;color:#1558B0;margin-top:3px">Tap to view history →</div>
+    </div>`;
+  }).join("")+'</div>';
+}
+
+async function loadPayments(){
+  const db=window.DB; const FS=window.FS;
+  const snaps=await FS.getDocs(FS.query(FS.collection(db,"payments"),FS.orderBy("createdAt","desc"),FS.limit(30)));
+  const list=[]; snaps.forEach(d=>list.push({id:d.id,...d.data()}));
+  const cMap={}; (window._customers||[]).forEach(c=>cMap[c.id]=c.name);
+  const btn='<button class="btn" style="width:100%;margin-top:8px" onclick="openModal(\'modal-payment\')"><i class="ti ti-cash"></i> Record Payment</button>';
+  if(!list.length){ document.getElementById("tab-payments").innerHTML='<div class="empty-state">No payments yet.</div>'+btn; return; }
+  document.getElementById("tab-payments").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:34%"><col style="width:28%"><col style="width:22%"><col style="width:16%"></colgroup><thead><tr><th>Customer</th><th>Amount</th><th>Method</th><th>Date</th></tr></thead><tbody>${list.map(p=>{ const d=p.createdAt&&p.createdAt.toDate?p.createdAt.toDate():new Date(); return `<tr><td>${cMap[p.customerId]||"—"}</td><td>ETB ${p.amount.toLocaleString()}</td><td><span class="badge bb">${p.method}</span></td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td></tr>`; }).join("")}</tbody></table></div>`+btn;
+}
+
+function renderExpenses(list){
+  const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
+  const cb={fuel:"ba",salary:"bb",rent:"bgr",utilities:"bgr",other:"bgr"};
+  if(!list.length){ document.getElementById("expenses-list").innerHTML='<div class="empty-state">No expenses yet.</div>'; return; }
+  document.getElementById("expenses-list").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:24%"><col style="width:26%"><col style="width:32%"></colgroup><thead><tr><th>Date</th><th>Category</th><th>Branch</th><th>Amount</th></tr></thead><tbody>${list.map(e=>{ const d=e.createdAt&&e.createdAt.toDate?e.createdAt.toDate():new Date(); return `<tr><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${cb[e.category]||"bgr"}">${e.category}</span></td><td>${bMap[e.branchId]||"—"}</td><td>ETB ${e.amount.toLocaleString()}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+
+async function loadDamage(){
+  const db=window.DB; const FS=window.FS;
+  const snaps=await FS.getDocs(FS.query(FS.collection(db,"damagedStock"),FS.orderBy("createdAt","desc"),FS.limit(30)));
+  const list=[]; snaps.forEach(d=>list.push({id:d.id,...d.data()}));
+  const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
+  const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
+  const rb={damaged:"br",expired:"ba",lost:"bgr",theft:"br"};
+  document.getElementById("damage-list").innerHTML=list.length?list.map(d=>`<div class="dmg-item"><div class="dmg-icon"><i class="ti ti-alert-triangle"></i></div><div style="flex:1"><div style="font-weight:500;font-size:13px">${pMap[d.productId]||"—"} x${d.quantity}</div><div style="font-size:12px;color:#666">${bMap[d.branchId]||"—"} · ${d.note||""}</div></div><div><span class="badge ${rb[d.reason]||"bgr"}">${d.reason}</span></div></div>`).join(""):'<div class="empty-state">No damage reports yet.</div>';
+}
+
+async function loadTransfers(){
+  const db=window.DB; const FS=window.FS;
+  const snaps=await FS.getDocs(FS.query(FS.collection(db,"transfers"),FS.orderBy("createdAt","desc"),FS.limit(30)));
+  const list=[]; snaps.forEach(d=>list.push({id:d.id,...d.data()}));
+  const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
+  const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
+  document.getElementById("transfer-list").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:40%"><col style="width:26%"><col style="width:16%"></colgroup><thead><tr><th>Date</th><th>Route</th><th>Product</th><th>Qty</th></tr></thead><tbody>${list.map(t=>{ const d=t.createdAt&&t.createdAt.toDate?t.createdAt.toDate():new Date(); return `<tr><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${bMap[t.fromBranchId]||"?"} → ${bMap[t.toBranchId]||"?"}</td><td>${pMap[t.productId]||"—"}</td><td>${t.quantity}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No transfers yet.</div>';
+}
+
+async function loadMovements(){
+  const db=window.DB; const FS=window.FS;
+  const snaps=await FS.getDocs(FS.query(FS.collection(db,"stockMovements"),FS.orderBy("createdAt","desc"),FS.limit(30)));
+  const list=[]; snaps.forEach(d=>list.push({id:d.id,...d.data()}));
+  const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
+  const tb={receipt:"bg",transfer_out:"bb",transfer_in:"bb",adjustment:"ba",sale:"bg",damage:"br"};
+  document.getElementById("tab-movement").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:26%"><col style="width:34%"><col style="width:22%"></colgroup><thead><tr><th>Date</th><th>Type</th><th>Product</th><th>Qty</th></tr></thead><tbody>${list.map(m=>{ const d=m.createdAt&&m.createdAt.toDate?m.createdAt.toDate():new Date(); return `<tr><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${tb[m.type]||"bgr"}">${m.type}</span></td><td>${pMap[m.productId]||"—"}</td><td>${m.quantity>0?"+":""}${m.quantity}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No movements yet.</div>';
+}
+
+function renderNotifications(list){
+  const ti={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],low_stock:["ni-stock","ti-alert-triangle"]};
+  document.getElementById("notif-list").innerHTML=list.length?list.map(n=>{ const [cls,ico]=(ti[n.type]||["ni-order","ti-file-invoice"]); const d=n.createdAt&&n.createdAt.toDate?n.createdAt.toDate():new Date(); const diff=Math.round((Date.now()-d)/60000); const time=diff<60?diff+"m ago":diff<1440?Math.round(diff/60)+"h ago":Math.round(diff/1440)+"d ago"; return `<div class="notif-item" style="${n.isRead?"opacity:.6":""}"><div class="ni ${cls}"><i class="ti ${ico}"></i></div><div class="notif-text"><div class="notif-title">${n.title}</div><div class="notif-desc">${n.description||""}</div></div><div class="notif-time">${time}</div></div>`; }).join(""):'<div class="empty-state">No notifications yet.</div>';
+}
+
+function renderStaff(list){
+  const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
+  const rb={ceo:"bb",manager:"ba",warehouse:"bgr",cashier:"bgr"};
+  document.getElementById("staff-list").innerHTML=list.length?`<table class="tbl"><colgroup><col style="width:36%"><col style="width:26%"><col style="width:24%"><col style="width:14%"></colgroup><thead><tr><th>Name</th><th>Role</th><th>Branch</th><th>Status</th></tr></thead><tbody>${list.map(s=>`<tr><td><b>${s.fullName}</b></td><td><span class="badge ${rb[s.role]||"bgr"}">${s.role}</span></td><td>${bMap[s.branchId]||"All"}</td><td><span class="badge ${s.isActive?"bg":"br"}">${s.isActive?"Active":"Off"}</span></td></tr>`).join("")}</tbody></table>`:'<div class="empty-state">No staff yet.</div>';
+}
+
+// ── CALCULATOR ───────────────────────────────────────────────
+window._calcItems = [];
+
+window.onCalcBranchChange = () => {
+  // repopulate products when branch changes
+  onCalcProductChange();
+};
+
+window.onCalcProductChange = async () => {
+  const productId  = document.getElementById("calc-product-sel").value;
+  const branchId   = document.getElementById("calc-branch-sel").value;
+  const priceType  = document.getElementById("calc-price-type").value;
+  const displayEl  = document.getElementById("calc-price-display");
+  if (!displayEl) return;
+  if (productId && branchId) {
+    const prices = await getProductPrices(productId, branchId);
+    const price = priceType === "wholesale" ? prices.wholesale : prices.retail;
+    if (price > 0) {
+      const other = priceType === "wholesale" ? prices.retail : prices.wholesale;
+      const otherLabel = priceType === "wholesale" ? "Retail" : "Wholesale";
+      displayEl.innerHTML = `<span style="background:#1558B0;color:#fff;border-radius:4px;padding:2px 10px;font-size:12px;font-weight:600">ETB ${price.toLocaleString()} / case</span> <span style="font-size:11px;color:#999;margin-left:4px">${otherLabel}: ETB ${other.toLocaleString()}</span>`;
+    } else {
+      displayEl.innerHTML = `<span style="color:#E24B4A;font-size:11px">⚠ No ${priceType} price set by CEO yet</span>`;
+    }
+  } else {
+    displayEl.innerHTML = "";
+  }
+};
+
+
+
+// ══════════════════════════════════════════════════════════
+// ONLINE PRESENCE TRACKING
+// ══════════════════════════════════════════════════════════
+window.startPresenceTracking = async () => {
+  const db = window.DB; const FS = window.FS;
+  const u = window.CURRENT_USER;
+  if (!u) return;
+
+  // Mark this user as online
+  const presenceRef = FS.doc(db, "presence", u.uid);
+  await FS.setDoc(presenceRef, {
+    uid: u.uid,
+    fullName: u.fullName,
+    role: u.role,
+    branchId: u.branchId || null,
+    branchName: u.branchName || "All Branches",
+    online: true,
+    lastSeen: FS.serverTimestamp()
+  });
+
+  // Update lastSeen every 60 seconds while tab is open
+  window._presenceInterval = setInterval(async () => {
+    try {
+      await FS.updateDoc(presenceRef, { online: true, lastSeen: FS.serverTimestamp() });
+    } catch(e) {}
+  }, 60000);
+
+  // Mark offline when tab closes
+  window.addEventListener("beforeunload", async () => {
+    try {
+      await FS.updateDoc(presenceRef, { online: false, lastSeen: FS.serverTimestamp() });
+    } catch(e) {}
+    clearInterval(window._presenceInterval);
+  });
+
+  // Also mark offline on visibility change (phone screen off)
+  document.addEventListener("visibilitychange", async () => {
+    try {
+      await FS.updateDoc(presenceRef, {
+        online: !document.hidden,
+        lastSeen: FS.serverTimestamp()
+      });
+    } catch(e) {}
+  });
+};
+
+// Load staff with online status (CEO only)
+window.loadStaffWithPresence = async () => {
+  const db = window.DB; const FS = window.FS;
+  const [staffSnaps, presenceSnaps] = await Promise.all([
+    FS.getDocs(FS.collection(db, "staff")),
+    FS.getDocs(FS.collection(db, "presence"))
+  ]);
+  const presenceMap = {};
+  presenceSnaps.forEach(d => { presenceMap[d.id] = d.data(); });
+  const list = [];
+  staffSnaps.forEach(d => {
+    const data = d.data();
+    const presence = presenceMap[d.id] || {};
+    // Consider online if lastSeen within last 3 minutes
+    let isOnline = false;
+    if (presence.online && presence.lastSeen) {
+      const lastSeen = presence.lastSeen.toDate ? presence.lastSeen.toDate() : new Date(presence.lastSeen);
+      isOnline = (Date.now() - lastSeen.getTime()) < 3 * 60 * 1000;
+    }
+    list.push({ id: d.id, ...data, isOnline, lastSeen: presence.lastSeen || null });
+  });
+  renderStaffWithPresence(list);
+};
+
+window.renderStaffWithPresence = (list) => {
+  const bMap = {}; (window._branches||[]).forEach(b => bMap[b.id] = b.name);
+  const rb = { ceo:"bb", manager:"ba", warehouse:"bgr", cashier:"bgr" };
+
+  if (!list.length) {
+    document.getElementById("staff-list").innerHTML = '<div class="empty-state">No staff yet.</div>';
+    return;
+  }
+
+  // Sort: online first
+  list.sort((a, b) => (b.isOnline ? 1 : 0) - (a.isOnline ? 1 : 0));
+
+  const onlineCount = list.filter(s => s.isOnline).length;
+  const offlineCount = list.length - onlineCount;
+
+  document.getElementById("staff-list").innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1;background:#EAF3DE;border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:20px;font-weight:800;color:#1D9E75">${onlineCount}</div>
+        <div style="font-size:11px;color:#3B6D11">Online Now</div>
+      </div>
+      <div style="flex:1;background:#FCEBEB;border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:20px;font-weight:800;color:#E24B4A">${offlineCount}</div>
+        <div style="font-size:11px;color:#791F1F">Offline</div>
+      </div>
+    </div>
+    ${list.map(s => {
+      const lastSeenText = s.lastSeen
+        ? (() => { const d = s.lastSeen.toDate ? s.lastSeen.toDate() : new Date(s.lastSeen); const diff = Math.round((Date.now()-d.getTime())/60000); return diff < 1 ? "just now" : diff < 60 ? diff+"m ago" : Math.round(diff/60)+"h ago"; })()
+        : "never";
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:0.5px solid #e5e5e0">
+        <div style="position:relative;flex-shrink:0">
+          <div style="width:38px;height:38px;border-radius:50%;background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#1558B0">${s.fullName?s.fullName.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase():"??"}</div>
+          <div style="position:absolute;bottom:0;right:0;width:12px;height:12px;border-radius:50%;background:${s.isOnline?'#1D9E75':'#E24B4A'};border:2px solid #fff"></div>
+        </div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;margin-bottom:1px">${s.fullName||"—"}</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span class="badge ${rb[s.role]||'bgr'}">${s.role}</span>
+            <span style="font-size:11px;color:#666">${bMap[s.branchId]||"All Branches"}</span>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-bottom:2px">
+            <div style="width:8px;height:8px;border-radius:50%;background:${s.isOnline?'#1D9E75':'#E24B4A'}"></div>
+            <span style="font-size:12px;font-weight:500;color:${s.isOnline?'#1D9E75':'#E24B4A'}">${s.isOnline?'Online':'Offline'}</span>
+          </div>
+          <div style="font-size:10px;color:#999">${s.isOnline?'Active now':'Last seen: '+lastSeenText}</div>
+        </div>
+      </div>`;
+    }).join("")}`;
+};
+
+
+// ══════════════════════════════════════════════════════════
+// FIX BRANDS — auto-assign brand based on product name prefix
+// ══════════════════════════════════════════════════════════
+window.fixBrandsAutomatically = async () => {
+  const db = window.DB; const FS = window.FS;
+  setLoading(true);
+  const snaps = await FS.getDocs(FS.collection(db, "products"));
+  let updated = 0;
+  const updates = [];
+  snaps.forEach(d => {
+    const data = d.data();
+    const name = (data.name || "").trim();
+    // Detect brand from product name prefix
+    let brand = data.brand || "";
+    if (!brand || brand === "Unbranded") {
+      if (name.toUpperCase().startsWith("KK")) brand = "KK";
+      else if (name.toUpperCase().startsWith("PEPSI")) brand = "Pepsi";
+      else if (name.toUpperCase().startsWith("COCA") || name.toUpperCase().startsWith("COKE")) brand = "Coca-Cola";
+      else if (name.toUpperCase().startsWith("AMBO")) brand = "Ambo";
+      else if (name.toUpperCase().startsWith("SPRITE")) brand = "Sprite";
+      else if (name.toUpperCase().startsWith("MIRINDA")) brand = "Mirinda";
+      else brand = "KK"; // default for your business
+    }
+    if (brand !== data.brand) {
+      updates.push(FS.updateDoc(FS.doc(db, "products", d.id), { brand }));
+      updated++;
+    }
+  });
+  await Promise.all(updates);
+  setLoading(false);
+  window._selectedBrand = "KK";
+  loadProducts();
+  alert(updated + " products updated! All KK products now grouped under the KK brand.");
+};
+
+window.addNewBrand = () => {
+  const name = document.getElementById("inp-new-brand-name").value.trim();
+  if (!name) { alert("Enter a brand name"); return; }
+  closeModal("modal-add-brand");
+  // Set selected brand and open add product modal with brand pre-filled
+  window._selectedBrand = name;
+  document.getElementById("inp-prod-brand").value = name;
+  document.getElementById("inp-new-brand-name").value = "";
+  openModal("modal-product");
+};
+
+window.addCalcItem = async () => {
+  const productId = document.getElementById("calc-product-sel").value;
+  const branchId  = document.getElementById("calc-branch-sel").value;
+  const priceType = document.getElementById("calc-price-type").value;
+  const qty       = parseInt(document.getElementById("calc-qty-inp").value) || 1;
+  if (!productId || !branchId) { alert("Select branch and product first"); return; }
+  const prices = await getProductPrices(productId, branchId);
+  const price = priceType === "wholesale" ? prices.wholesale : prices.retail;
+  if (!price) { alert("No " + priceType + " price set for this product. Ask CEO to set prices."); return; }
+  const product = (window._products||[]).find(p => p.id === productId);
+  const subtotal = price * qty;
+  window._calcItems.push({ productId, productName: product ? product.name : productId, qty, price, priceType, subtotal });
+  renderCalcItems();
+  document.getElementById("calc-qty-inp").value = 1;
+  document.getElementById("calc-product-sel").value = "";
+  document.getElementById("calc-price-display").innerHTML = "";
+};
+
+window.removeCalcItem = (idx) => {
+  window._calcItems.splice(idx, 1);
+  renderCalcItems();
+};
+
+window.renderCalcItems = () => {
+  const container = document.getElementById("calc-items-list");
+  if (!window._calcItems.length) {
+    container.innerHTML = '<div style="text-align:center;padding:16px;font-size:12px;color:#999">No items added yet</div>';
+    document.getElementById("calc-grand-total").textContent = "ETB 0";
+    document.getElementById("calc-total-items").textContent = "0 cases";
+    return;
+  }
+  container.innerHTML = window._calcItems.map((item, i) => {
+    const badge = item.priceType === "wholesale"
+      ? '<span style="background:#E6F1FB;color:#0C447C;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:500">W</span>'
+      : '<span style="background:#EAF3DE;color:#27500A;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:500">R</span>';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid #f0f0eb">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;margin-bottom:2px">${badge} ${item.productName}</div>
+        <div style="font-size:11px;color:#666">${item.qty} cases × ETB ${item.price.toLocaleString()} = <strong style="color:#1558B0">ETB ${item.subtotal.toLocaleString()}</strong></div>
+      </div>
+      <button onclick="removeCalcItem(${i})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px;padding:0"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join("");
+  const grandTotal = window._calcItems.reduce((s, i) => s + i.subtotal, 0);
+  const totalCases = window._calcItems.reduce((s, i) => s + i.qty, 0);
+  document.getElementById("calc-grand-total").textContent = "ETB " + grandTotal.toLocaleString();
+  document.getElementById("calc-total-items").textContent = totalCases + " cases";
+};
+
+window.clearCalc = () => {
+  window._calcItems = [];
+  renderCalcItems();
+  document.getElementById("calc-product-sel").value = "";
+  document.getElementById("calc-price-display").innerHTML = "";
+  document.getElementById("calc-qty-inp").value = 1;
+};
+
+// Populate calc selects when page loads
+window.populateCalcSelects = () => {
+  const branches = window._branches || [];
+  const products = window._products || [];
+  const bSel = document.getElementById("calc-branch-sel");
+  const pSel = document.getElementById("calc-product-sel");
+  if (bSel) {
+    bSel.innerHTML = '<option value="">Select branch…</option>';
+    branches.forEach(b => { const o = document.createElement("option"); o.value = b.id; o.textContent = b.name; bSel.appendChild(o); });
+  }
+  if (pSel) {
+    pSel.innerHTML = '<option value="">Select product…</option>';
+    products.forEach(p => { const o = document.createElement("option"); o.value = p.id; o.textContent = p.name; pSel.appendChild(o); });
+  }
+};
+
+window.saveProductPriceForm = async () => {
+  const branchId   = document.getElementById("inp-price-branch").value;
+  const productId  = document.getElementById("inp-price-product").value;
+  const wholesale  = parseFloat(document.getElementById("inp-price-wholesale").value);
+  const retail     = parseFloat(document.getElementById("inp-price-retail").value);
+  if (!branchId || !productId || !wholesale || !retail) { alert("Fill all fields including both prices"); return; }
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  const id = branchId + "_" + productId;
+  await FS.setDoc(FS.doc(db, "productPrices", id), {
+    productId, branchId,
+    wholesalePrice: wholesale,
+    retailPrice: retail,
+    updatedAt: FS.serverTimestamp()
+  });
+  document.getElementById("inp-price-wholesale").value = "";
+  document.getElementById("inp-price-retail").value = "";
+  loadPricesList();
+  setLoading(false);
+};
+
+window.loadPricesList = async () => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.collection(db, "productPrices"));
+  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  const bMap = {}; (window._branches||[]).forEach(b => bMap[b.id] = b.name);
+  const pMap = {}; (window._products||[]).forEach(p => pMap[p.id] = p.name);
+  const el = document.getElementById("prices-list");
+  if (!el) return;
+  el.innerHTML = list.length ? list.map(p => `
+    <div style="padding:6px 0;border-bottom:0.5px solid #e5e5e0;font-size:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <div><span style="font-weight:500">${pMap[p.productId]||p.productId}</span> <span style="color:#666;font-size:11px">· ${bMap[p.branchId]||p.branchId}</span></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <span style="background:#E6F1FB;color:#0C447C;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:500">W: ETB ${(p.wholesalePrice||0).toLocaleString()}</span>
+        <span style="background:#EAF3DE;color:#27500A;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:500">R: ETB ${(p.retailPrice||0).toLocaleString()}</span>
+      </div>
+    </div>`).join("") : '<div style="font-size:12px;color:#999;text-align:center">No prices set yet</div>';
+};
+
+
+// ══════════════════════════════════════════════════════════
+// TIMESTAMP HELPER
+// ══════════════════════════════════════════════════════════
+function fmtTs(ts) {
+  if (!ts) return "—";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleString("en-GB", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" });
+}
+
+// ══════════════════════════════════════════════════════════
+// 1. BRANCH DETAIL
+// ══════════════════════════════════════════════════════════
+window.openBranchDetail = async (branchId, branchName) => {
+  document.getElementById("bd-title").textContent = branchName;
+  window._detailBranchId = branchId;
+  openModal("modal-branch-detail");
+  loadBranchDetailStock(branchId);
+};
+
+window.switchBranchDetailTab = (btn, tabId) => {
+  btn.closest(".tab-bar").querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  ["bdt-stock","bdt-credit","bdt-orders","bdt-expenses"].forEach(id => {
+    document.getElementById(id).style.display = id === tabId ? "block" : "none";
+  });
+  const bid = window._detailBranchId;
+  if (tabId === "bdt-stock")    loadBranchDetailStock(bid);
+  if (tabId === "bdt-credit")   loadBranchDetailCredit(bid);
+  if (tabId === "bdt-orders")   loadBranchDetailOrders(bid);
+  if (tabId === "bdt-expenses") loadBranchDetailExpenses(bid);
+};
+
+window.loadBranchDetailStock = async (branchId) => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"stock"), FS.where("branchId","==",branchId)));
+  const pMap = {}; (window._products||[]).forEach(p => pMap[p.id] = p);
+  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  const el = document.getElementById("bdt-stock");
+  if (!list.length) { el.innerHTML = '<div class="empty-state">No stock in this branch</div>'; return; }
+  // group by brand
+  const byBrand = {};
+  list.forEach(s => {
+    const p = pMap[s.productId];
+    const brand = p ? (p.brand || p.category || "Other") : "Other";
+    if (!byBrand[brand]) byBrand[brand] = [];
+    byBrand[brand].push({ ...s, productName: p ? p.name : s.productId });
+  });
+  let html = "";
+  for (const [brand, items] of Object.entries(byBrand)) {
+    html += `<div style="font-size:11px;font-weight:600;color:#1558B0;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 5px">${brand}</div>`;
+    items.forEach(s => {
+      const qty = s.quantity;
+      const color = qty < 20 ? "#E24B4A" : qty < 50 ? "#EF9F27" : "#1D9E75";
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid #e5e5e0;font-size:13px">
+        <span>${s.productName}</span>
+        <span style="font-weight:700;color:${color}">${qty} cases</span>
+      </div>`;
+    });
+  }
+  el.innerHTML = html;
+};
+
+window.loadBranchDetailCredit = async (branchId) => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.collection(db, "customers"));
+  const list = []; snaps.forEach(d => { const data = d.data(); if (data.outstandingBalance > 0) list.push({ id: d.id, ...data }); });
+  const el = document.getElementById("bdt-credit");
+  if (!list.length) { el.innerHTML = '<div class="empty-state">No outstanding credit</div>'; return; }
+  const total = list.reduce((s, c) => s + (c.outstandingBalance || 0), 0);
+  let html = `<div style="background:#FCEBEB;border-radius:8px;padding:10px;margin-bottom:10px;display:flex;justify-content:space-between"><span style="font-size:13px;font-weight:500">Total Outstanding</span><span style="font-size:16px;font-weight:800;color:#E24B4A">ETB ${total.toLocaleString()}</span></div>`;
+  list.forEach(c => {
+    const pct = c.creditLimit > 0 ? Math.min(100, Math.round((c.outstandingBalance / c.creditLimit) * 100)) : 0;
+    const cls = pct >= 90 ? "cd" : pct >= 70 ? "cw" : "cs";
+    html += `<div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0;cursor:pointer" onclick="openCustomerDetail('${c.id}','${c.name}')">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+        <span style="font-weight:500;font-size:13px">${c.name}</span>
+        <span style="font-size:12px;color:#E24B4A;font-weight:600">ETB ${(c.outstandingBalance||0).toLocaleString()}</span>
+      </div>
+      <div style="font-size:11px;color:#666;margin-bottom:3px">${c.phone||""} · ${pct}% of limit used</div>
+      <div class="credit-bar"><div class="credit-fill ${cls}" style="width:${pct}%"></div></div>
+    </div>`;
+  });
+  el.innerHTML = html;
+};
+
+window.loadBranchDetailOrders = async (branchId) => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"orders"), FS.where("branchId","==",branchId), FS.orderBy("createdAt","desc"), FS.limit(20)));
+  const cMap = {}; (window._customers||[]).forEach(c => cMap[c.id] = c.name);
+  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  const sb = { paid:"bg", unpaid:"ba", partial:"bb", credit:"br" };
+  document.getElementById("bdt-orders").innerHTML = list.length ? `<table class="tbl">
+    <colgroup><col style="width:34%"><col style="width:28%"><col style="width:18%"><col style="width:20%"></colgroup>
+    <thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
+    <tbody>${list.map(o => `<tr><td>${cMap[o.customerId]||"Walk-in"}</td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span></td><td style="font-size:11px">${fmtTs(o.createdAt)}</td></tr>`).join("")}</tbody>
+  </table>` : '<div class="empty-state">No orders yet</div>';
+};
+
+window.loadBranchDetailExpenses = async (branchId) => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"expenses"), FS.where("branchId","==",branchId), FS.orderBy("createdAt","desc"), FS.limit(20)));
+  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  const cb = { fuel:"ba", salary:"bb", rent:"bgr", utilities:"bgr", other:"bgr" };
+  document.getElementById("bdt-expenses").innerHTML = list.length ? `<table class="tbl">
+    <colgroup><col style="width:34%"><col style="width:26%"><col style="width:40%"></colgroup>
+    <thead><tr><th>Category</th><th>Amount</th><th>Date & Time</th></tr></thead>
+    <tbody>${list.map(e => `<tr><td><span class="badge ${cb[e.category]||"bgr"}">${e.category}</span></td><td>ETB ${e.amount.toLocaleString()}</td><td style="font-size:11px">${fmtTs(e.createdAt)}</td></tr>`).join("")}</tbody>
+  </table>` : '<div class="empty-state">No expenses yet</div>';
+};
+
+// ══════════════════════════════════════════════════════════
+// 7. CUSTOMER DETAIL
+// ══════════════════════════════════════════════════════════
+window.openCustomerDetail = async (customerId, customerName) => {
+  document.getElementById("cd-title").textContent = customerName;
+  window._detailCustomerId = customerId;
+  openModal("modal-customer-detail");
+  loadCustDetailOrders(customerId);
+};
+
+window.switchCustDetailTab = (btn, tabId) => {
+  btn.closest(".tab-bar").querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  ["cdt-orders","cdt-payments","cdt-credit"].forEach(id => {
+    document.getElementById(id).style.display = id === tabId ? "block" : "none";
+  });
+  const cid = window._detailCustomerId;
+  if (tabId === "cdt-orders")   loadCustDetailOrders(cid);
+  if (tabId === "cdt-payments") loadCustDetailPayments(cid);
+  if (tabId === "cdt-credit")   loadCustDetailCreditLog(cid);
+};
+
+window.loadCustDetailOrders = async (customerId) => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"orders"), FS.where("customerId","==",customerId), FS.orderBy("createdAt","desc"), FS.limit(30)));
+  const bMap = {}; (window._branches||[]).forEach(b => bMap[b.id] = b.name);
+  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  const sb = { paid:"bg", unpaid:"ba", partial:"bb", credit:"br" };
+  document.getElementById("cdt-orders").innerHTML = list.length ? list.map(o => `
+    <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+        <span style="font-weight:600;font-size:13px">ETB ${(o.totalAmount||0).toLocaleString()}</span>
+        <span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span>
+      </div>
+      <div style="font-size:11px;color:#666">${bMap[o.branchId]||"—"} · ${o.paymentMethod||""} · ${o.itemCount||1} product(s)</div>
+      <div style="font-size:11px;color:#999;margin-top:2px"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtTs(o.createdAt)}</div>
+      ${o.partialPayment ? `<div style="font-size:11px;color:#EF9F27">Paid: ETB ${(o.paidAmount||0).toLocaleString()} · Credit: ETB ${((o.totalAmount||0)-(o.paidAmount||0)).toLocaleString()}</div>` : ""}
+    </div>`).join("") : '<div class="empty-state">No orders yet</div>';
+};
+
+window.loadCustDetailPayments = async (customerId) => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"payments"), FS.where("customerId","==",customerId), FS.orderBy("createdAt","desc"), FS.limit(30)));
+  const sMap = {}; // staff map
+  const sSnaps = await FS.getDocs(FS.collection(db,"staff"));
+  sSnaps.forEach(d => sMap[d.id] = d.data().fullName);
+  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  document.getElementById("cdt-payments").innerHTML = list.length ? list.map(p => `
+    <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+        <span style="font-weight:600;font-size:13px;color:#1D9E75">ETB ${p.amount.toLocaleString()}</span>
+        <span class="badge bb">${p.method}</span>
+      </div>
+      ${p.method==="bank_transfer" ? `<div style="font-size:11px;color:#666">Bank transfer to: <strong>${p.transferTo||"—"}</strong></div>` : ""}
+      <div style="font-size:11px;color:#666">Handled by: <strong>${sMap[p.receivedBy]||"—"}</strong></div>
+      <div style="font-size:11px;color:#999;margin-top:2px"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtTs(p.createdAt)}</div>
+    </div>`).join("") : '<div class="empty-state">No payments yet</div>';
+};
+
+window.loadCustDetailCreditLog = async (customerId) => {
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"creditLog"), FS.where("customerId","==",customerId), FS.orderBy("createdAt","desc"), FS.limit(30)));
+  const sSnaps = await FS.getDocs(FS.collection(db,"staff"));
+  const sMap = {}; sSnaps.forEach(d => sMap[d.id] = d.data().fullName);
+  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  const actionColors = { given:"br", arrested:"bg", adjusted:"ba", increased:"bb" };
+  document.getElementById("cdt-credit").innerHTML = list.length ? list.map(c => `
+    <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
+      <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+        <span class="badge ${actionColors[c.action]||"bgr"}">${c.action}</span>
+        <span style="font-weight:700;font-size:13px">ETB ${(c.amount||0).toLocaleString()}</span>
+      </div>
+      <div style="font-size:11px;color:#666">${c.note||""}</div>
+      <div style="font-size:11px;color:#666">By: <strong>${sMap[c.doneBy]||"—"}</strong></div>
+      <div style="font-size:11px;color:#999;margin-top:2px"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtTs(c.createdAt)}</div>
+    </div>`).join("") : '<div class="empty-state">No credit history yet</div>';
+};
+
+// ══════════════════════════════════════════════════════════
+// 6. CREDIT MANAGEMENT
+// ══════════════════════════════════════════════════════════
+window.openCreditMgmt = () => {
+  openModal("modal-credit-mgmt");
+  const el = document.getElementById("inp-credit-customer");
+  el.innerHTML = '<option value="">Select customer…</option>';
+  const withCredit = (window._customers||[]).filter(c => (c.outstandingBalance||0) > 0);
+  if (!withCredit.length) {
+    el.innerHTML = '<option value="" disabled>No customers with outstanding credit</option>';
+  } else {
+    withCredit.forEach(c => {
+      const pct = c.creditLimit > 0 ? Math.round((c.outstandingBalance/c.creditLimit)*100) : 0;
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name + " — ETB " + (c.outstandingBalance||0).toLocaleString() + " outstanding (" + pct + "% of limit)";
+      el.appendChild(o);
+    });
+  }
+  document.getElementById("inp-credit-customer").onchange = async function() {
+    const cid = this.value;
+    const c = (window._customers||[]).find(x => x.id === cid);
+    if (c) {
+      document.getElementById("credit-bal-val").textContent = "ETB " + (c.outstandingBalance||0).toLocaleString();
+      document.getElementById("credit-limit-val").textContent = "ETB " + (c.creditLimit||0).toLocaleString();
+      document.getElementById("credit-current-balance").style.display = "block";
+    }
+  };
+};
+
+window.saveCreditAction = async () => {
+  const customerId = document.getElementById("inp-credit-customer").value;
+  const action     = document.getElementById("inp-credit-action").value;
+  const amount     = parseFloat(document.getElementById("inp-credit-amount").value);
+  const note       = document.getElementById("inp-credit-note").value.trim();
+  const u          = window.CURRENT_USER;
+  if (!customerId || !amount) { alert("Fill all fields"); return; }
+  // Permission check
+  const customer = (window._customers||[]).find(c => c.id === customerId);
+  if (u.role === "manager" && customer && customer.branchId && customer.branchId !== u.branchId) {
+    alert("You can only manage credit for your own branch customers."); return;
+  }
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  let updateData = {};
+  if (action === "arrest") {
+    updateData.outstandingBalance = Math.max(0, (customer.outstandingBalance||0) - amount);
+  } else if (action === "adjust") {
+    updateData.outstandingBalance = amount;
+  } else if (action === "increase_limit") {
+    updateData.creditLimit = (customer.creditLimit||0) + amount;
+  }
+  await FS.updateDoc(FS.doc(db, "customers", customerId), updateData);
+  await FS.addDoc(FS.collection(db, "creditLog"), {
+    customerId, action, amount, note,
+    doneBy: u.uid, branchId: u.branchId || null,
+    createdAt: FS.serverTimestamp()
+  });
+  closeModal("modal-credit-mgmt");
+  loadCustomers();
+  setLoading(false);
+};
+
+// ══════════════════════════════════════════════════════════
+// 8. PAYMENT WITH BANK TRANSFER TO / HANDLED BY
+// ══════════════════════════════════════════════════════════
+// Updated in savePayment - add transferTo and handledBy fields
+window._originalSavePayment = window.savePayment;
+window.savePayment = async () => {
+  const orderId    = document.getElementById("inp-pay-order").value.trim();
+  const customerId = document.getElementById("inp-pay-customer").value;
+  const branchId   = document.getElementById("inp-pay-branch").value;
+  const amount     = parseFloat(document.getElementById("inp-pay-amount").value);
+  const method     = document.getElementById("inp-pay-method").value;
+  const transferTo = document.getElementById("inp-pay-transfer-to") ? document.getElementById("inp-pay-transfer-to").value.trim() : "";
+  if (!customerId || !amount || !branchId) { alert("Fill all fields"); return; }
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  await FS.addDoc(FS.collection(db, "payments"), {
+    orderId: orderId || null, customerId, branchId, amount, method,
+    transferTo: method === "bank_transfer" ? transferTo : null,
+    receivedBy: window.CURRENT_USER.uid,
+    createdAt: FS.serverTimestamp()
+  });
+  if (orderId) {
+    const oRef = FS.doc(db, "orders", orderId);
+    const oSnap = await FS.getDoc(oRef);
+    if (oSnap.exists()) {
+      const o = oSnap.data();
+      const newPaid = (o.paidAmount || 0) + amount;
+      const status  = newPaid >= o.totalAmount ? "paid" : "partial";
+      await FS.updateDoc(oRef, { paidAmount: newPaid, paymentStatus: status, updatedAt: FS.serverTimestamp() });
+    }
+  }
+  // Update customer outstanding
+  if (customerId) {
+    const cRef = FS.doc(db, "customers", customerId);
+    const cSnap = await FS.getDoc(cRef);
+    if (cSnap.exists()) {
+      const c = cSnap.data();
+      const newBal = Math.max(0, (c.outstandingBalance||0) - amount);
+      await FS.updateDoc(cRef, { outstandingBalance: newBal });
+    }
+  }
+  closeModal("modal-payment");
+  loadOrders();
+  setLoading(false);
+};
+
+// ══════════════════════════════════════════════════════════
+// 9. ENHANCED DAMAGE REASONS
+// ══════════════════════════════════════════════════════════
+window._originalSaveDamage = window.saveDamage;
+window.saveDamage = async () => {
+  const branchId    = document.getElementById("inp-dmg-branch").value;
+  const productId   = document.getElementById("inp-dmg-product").value;
+  const qty         = parseInt(document.getElementById("inp-dmg-qty").value);
+  const reason      = document.getElementById("inp-dmg-reason").value;
+  const note        = document.getElementById("inp-dmg-note").value.trim();
+  const spillCount  = parseInt(document.getElementById("inp-dmg-spill-count")?.value) || 0;
+  const missingCount= parseInt(document.getElementById("inp-dmg-missing-count")?.value) || 0;
+  const pkgDamage   = document.getElementById("inp-dmg-pkg")?.checked || false;
+  if (!branchId || !productId || !qty) { alert("Fill all fields"); return; }
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  await FS.addDoc(FS.collection(db, "damagedStock"), {
+    branchId, productId, quantity: qty, reason, note,
+    spillingItems: spillCount, missingItems: missingCount, packagingDamaged: pkgDamage,
+    reportedBy: window.CURRENT_USER.uid, createdAt: FS.serverTimestamp()
+  });
+  // 12. Auto-adjust stock
+  const stockId = branchId + "_" + productId;
+  const stockRef = FS.doc(db, "stock", stockId);
+  const stockSnap = await FS.getDoc(stockRef);
+  if (stockSnap.exists()) {
+    const newQty = Math.max(0, (stockSnap.data().quantity || 0) - qty);
+    await FS.updateDoc(stockRef, { quantity: newQty, updatedAt: FS.serverTimestamp() });
+  }
+  await FS.addDoc(FS.collection(db, "notifications"), { type: "damage", title: "Damaged stock reported", description: qty + " units - " + reason, branchId, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp() });
+  closeModal("modal-damage");
+  loadStock();
+  setLoading(false);
+};
+
+// ══════════════════════════════════════════════════════════
+// 3. BRANDS IN PRODUCTS
+// ══════════════════════════════════════════════════════════
+window._selectedBrand = null;
+window.selectBrand = (brand) => {
+  window._selectedBrand = brand;
+  renderProducts(window._products || []);
+};
+
+// ══════════════════════════════════════════════════════════
+// BRANCH DETAIL CLICK
+// ══════════════════════════════════════════════════════════
+// Override renderBranches to make cards clickable
+window._renderBranchesOrig = window.renderBranches;
+
+
+// ══════════════════════════════════════════════════════════
+// THEME SYSTEM
+// ══════════════════════════════════════════════════════════
+const THEMES = ["blue","white","green","dark","amber","purple","auto"];
+
+window.applyTheme = (theme) => {
+  THEMES.forEach(t => document.body.classList.remove("theme-" + t));
+  document.body.classList.add("theme-" + theme);
+  localStorage.setItem("ob-theme", theme);
+  // Update checks
+  THEMES.forEach(t => {
+    const chk = document.getElementById("chk-" + t);
+    const item = document.getElementById("tp-" + t);
+    if (chk) { chk.className = "tp-check " + (t === theme ? "on" : "off"); }
+    if (item) { item.classList.toggle("active", t === theme); }
+  });
+  // Update theme button color to match
+  const btn = document.getElementById("theme-btn");
+  if (btn) btn.style.opacity = "1";
+};
+
+window.toggleThemePicker = () => {
+  const panel = document.getElementById("theme-panel");
+  const overlay = document.getElementById("theme-overlay");
+  const isOpen = panel.classList.contains("open");
+  if (isOpen) { panel.classList.remove("open"); overlay.classList.remove("open"); }
+  else { panel.classList.add("open"); overlay.classList.add("open"); }
+};
+
+window.closeThemePicker = () => {
+  document.getElementById("theme-panel").classList.remove("open");
+  document.getElementById("theme-overlay").classList.remove("open");
+};
+
+// Load saved theme on startup
+(function() {
+  const saved = localStorage.getItem("ob-theme") || "white";
+  applyTheme(saved);
+})();
+
+document.getElementById("login-screen").style.display="none";
+document.getElementById("main-app").style.display="none";
+</script>
+
+<!-- SET PRODUCT PRICES MODAL (CEO only) -->
+<div class="modal-bg" id="modal-set-price"><div class="modal">
+  <div class="modal-title">Set Product Prices <button onclick="closeModal('modal-set-price')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div style="font-size:12px;color:#666;margin-bottom:10px">Set wholesale and retail prices per product per branch. Workers will choose the price type when creating orders.</div>
+  <div class="form-field"><label>Branch</label><select id="inp-price-branch"><option value="">Select branch…</option></select></div>
+  <div class="form-field"><label>Product</label><select id="inp-price-product"><option value="">Select product…</option></select></div>
+  <div class="form-row">
+    <div class="form-field"><label>Wholesale Price (ETB)</label><input id="inp-price-wholesale" type="number" placeholder="e.g. 400"></div>
+    <div class="form-field"><label>Retail Price (ETB)</label><input id="inp-price-retail" type="number" placeholder="e.g. 480"></div>
+  </div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveProductPriceForm()"><i class="ti ti-check"></i> Save Prices</button>
+  <div style="margin-top:12px;padding-top:12px;border-top:0.5px solid #e5e5e0">
+    <div style="font-size:11px;font-weight:500;color:#666;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Current Prices</div>
+    <div id="prices-list"><div style="font-size:12px;color:#999;text-align:center;padding:8px">Loading…</div></div>
+  </div>
+</div></div>
+
+<!-- BRANCH DETAIL MODAL -->
+<div class="modal-bg" id="modal-branch-detail"><div class="modal" style="max-width:420px">
+  <div class="modal-title">
+    <span id="bd-title">Branch Detail</span>
+    <button onclick="closeModal('modal-branch-detail')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="tab-bar" style="margin-bottom:10px">
+    <button class="tab-btn active" onclick="switchBranchDetailTab(this,'bdt-stock')">Stock</button>
+    <button class="tab-btn" onclick="switchBranchDetailTab(this,'bdt-credit')">Credit</button>
+    <button class="tab-btn" onclick="switchBranchDetailTab(this,'bdt-orders')">Orders</button>
+    <button class="tab-btn" onclick="switchBranchDetailTab(this,'bdt-expenses')">Expenses</button>
+  </div>
+  <div id="bdt-stock"><div class="empty-state">Loading…</div></div>
+  <div id="bdt-credit" style="display:none"><div class="empty-state">Loading…</div></div>
+  <div id="bdt-orders" style="display:none"><div class="empty-state">Loading…</div></div>
+  <div id="bdt-expenses" style="display:none"><div class="empty-state">Loading…</div></div>
+</div></div>
+
+<!-- CUSTOMER DETAIL MODAL -->
+<div class="modal-bg" id="modal-customer-detail"><div class="modal" style="max-width:420px">
+  <div class="modal-title">
+    <span id="cd-title">Customer History</span>
+    <button onclick="closeModal('modal-customer-detail')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchCustDetailTab(this,'cdt-orders')">Orders</button>
+    <button class="tab-btn" onclick="switchCustDetailTab(this,'cdt-payments')">Payments</button>
+    <button class="tab-btn" onclick="switchCustDetailTab(this,'cdt-credit')">Credit Log</button>
+  </div>
+  <div id="cdt-orders"><div class="empty-state">Loading…</div></div>
+  <div id="cdt-payments" style="display:none"><div class="empty-state">Loading…</div></div>
+  <div id="cdt-credit" style="display:none"><div class="empty-state">Loading…</div></div>
+</div></div>
+
+<!-- CREDIT MANAGEMENT MODAL -->
+<div class="modal-bg" id="modal-credit-mgmt"><div class="modal">
+  <div class="modal-title">Manage Customer Credit <button onclick="closeModal('modal-credit-mgmt')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div style="font-size:12px;color:#666;margin-bottom:10px">CEO can adjust any customer credit. Branch managers can only adjust their branch customers after payment is received.</div>
+  <div class="form-field"><label>Customer</label><select id="inp-credit-customer"><option value="">Select…</option></select></div>
+  <div id="credit-current-balance" style="background:#f5f5f0;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;display:none">
+    <div style="display:flex;justify-content:space-between"><span style="color:#666">Outstanding Balance</span><span id="credit-bal-val" style="font-weight:700;color:#E24B4A">ETB 0</span></div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px"><span style="color:#666">Credit Limit</span><span id="credit-limit-val" style="font-weight:500">ETB 0</span></div>
+  </div>
+  <div class="form-field"><label>Action</label>
+    <select id="inp-credit-action">
+      <option value="arrest">Arrest / Deduct Credit (payment received)</option>
+      <option value="adjust">Adjust Credit Amount</option>
+      <option value="increase_limit">Increase Credit Limit</option>
+    </select>
+  </div>
+  <div class="form-field"><label>Amount (ETB)</label><input id="inp-credit-amount" type="number" placeholder="0"></div>
+  <div class="form-field"><label>Note</label><input id="inp-credit-note" type="text" placeholder="e.g. Cash payment received"></div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveCreditAction()"><i class="ti ti-check"></i> Apply</button>
+</div></div>
+
+<!-- ADD BRAND MODAL -->
+<div class="modal-bg" id="modal-add-brand"><div class="modal">
+  <div class="modal-title">Add New Brand <button onclick="closeModal('modal-add-brand')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div style="font-size:12px;color:#666;margin-bottom:12px">Create a brand group first, then add products under it.</div>
+  <div class="form-field"><label>Brand Name</label><input id="inp-new-brand-name" type="text" placeholder="e.g. KK, Pepsi, Coca-Cola, Ambo"></div>
+  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="addNewBrand()"><i class="ti ti-check"></i> Create Brand</button>
+</div></div>
+
+<div class="theme-picker-overlay" id="theme-overlay" onclick="closeThemePicker()"></div>
+<div class="theme-picker-panel" id="theme-panel">
+  <div class="tp-header">
+    <div class="tp-title"><i class="ti ti-palette" style="font-size:16px;vertical-align:-2px;margin-right:6px" aria-hidden="true"></i>Choose Theme</div>
+    <button class="tp-close" onclick="closeThemePicker()"><i class="ti ti-x"></i></button>
+  </div>
+
+  <!-- Theme White: Clean White (default) -->
+  <div class="tp-item active" id="tp-white" onclick="applyTheme('white')">
+    <div class="tp-preview">
+      <div class="tp-preview-bar" style="background:#fff;border-bottom:1px solid #e5e5e0"></div>
+      <div class="tp-preview-body" style="background:#f9f9f9">
+        <div class="tp-preview-card" style="background:#fff;border:0.5px solid #e5e5e0"></div>
+        <div class="tp-preview-card" style="background:#E6F1FB"></div>
+      </div>
+    </div>
+    <div class="tp-info">
+      <div class="tp-name">Clean White</div>
+      <div class="tp-desc">Default · Bright sidebar look</div>
+    </div>
+    <div class="tp-check on" id="chk-white"><i class="ti ti-check"></i></div>
+  </div>
+
+  <!-- Theme 1: Blue -->
+  <div class="tp-item" id="tp-blue" onclick="applyTheme('blue')">
+    <div class="tp-preview">
+      <div class="tp-preview-bar" style="background:#1558B0"></div>
+      <div class="tp-preview-body" style="background:#f5f5f0">
+        <div class="tp-preview-card" style="background:#fff;border:0.5px solid #e5e5e0"></div>
+        <div class="tp-preview-card" style="background:#E6F1FB"></div>
+      </div>
+    </div>
+    <div class="tp-info">
+      <div class="tp-name">Deep Blue</div>
+      <div class="tp-desc">Professional · Corporate · Light mode</div>
+    </div>
+    <div class="tp-check off" id="chk-blue"><i class="ti ti-check"></i></div>
+  </div>
+
+  <!-- Theme 2: Green -->
+  <div class="tp-item" id="tp-green" onclick="applyTheme('green')">
+    <div class="tp-preview">
+      <div class="tp-preview-bar" style="background:#0F6E56"></div>
+      <div class="tp-preview-body" style="background:#f0f5f1">
+        <div class="tp-preview-card" style="background:#fff;border:0.5px solid #d0e8d8"></div>
+        <div class="tp-preview-card" style="background:#E1F5EE"></div>
+      </div>
+    </div>
+    <div class="tp-info">
+      <div class="tp-name">Forest Green</div>
+      <div class="tp-desc">Fresh · Natural · Beverages feel</div>
+    </div>
+    <div class="tp-check off" id="chk-green"><i class="ti ti-check"></i></div>
+  </div>
+
+  <!-- Theme 3: Dark -->
+  <div class="tp-item" id="tp-dark" onclick="applyTheme('dark')">
+    <div class="tp-preview">
+      <div class="tp-preview-bar" style="background:#111"></div>
+      <div class="tp-preview-body" style="background:#0d0d0d">
+        <div class="tp-preview-card" style="background:#1e1e1e;border:0.5px solid #333"></div>
+        <div class="tp-preview-card" style="background:#185FA5;opacity:.6"></div>
+      </div>
+    </div>
+    <div class="tp-info">
+      <div class="tp-name">Dark Premium</div>
+      <div class="tp-desc">Night mode · Modern · Easy on eyes</div>
+    </div>
+    <div class="tp-check off" id="chk-dark"><i class="ti ti-check"></i></div>
+  </div>
+
+  <!-- Theme 4: Amber -->
+  <div class="tp-item" id="tp-amber" onclick="applyTheme('amber')">
+    <div class="tp-preview">
+      <div class="tp-preview-bar" style="background:#854F0B"></div>
+      <div class="tp-preview-body" style="background:#fdf8f0">
+        <div class="tp-preview-card" style="background:#fff;border:0.5px solid #f0e0c0"></div>
+        <div class="tp-preview-card" style="background:#FAEEDA"></div>
+      </div>
+    </div>
+    <div class="tp-info">
+      <div class="tp-name">Warm Amber</div>
+      <div class="tp-desc">Ethiopian warmth · Trustworthy · Local</div>
+    </div>
+    <div class="tp-check off" id="chk-amber"><i class="ti ti-check"></i></div>
+  </div>
+
+  <!-- Theme 5: Purple -->
+  <div class="tp-item" id="tp-purple" onclick="applyTheme('purple')">
+    <div class="tp-preview">
+      <div class="tp-preview-bar" style="background:#3C3489"></div>
+      <div class="tp-preview-body" style="background:#f4f2fe">
+        <div class="tp-preview-card" style="background:#fff;border:0.5px solid #d8d4f8"></div>
+        <div class="tp-preview-card" style="background:#EEEDFE"></div>
+      </div>
+    </div>
+    <div class="tp-info">
+      <div class="tp-name">Midnight Purple</div>
+      <div class="tp-desc">Bold · Premium · Distinctive</div>
+    </div>
+    <div class="tp-check off" id="chk-purple"><i class="ti ti-check"></i></div>
+  </div>
+
+  <!-- Theme 6: Auto -->
+  <div class="tp-item" id="tp-auto" onclick="applyTheme('auto')">
+    <div class="tp-preview" style="overflow:hidden">
+      <div style="display:grid;grid-template-columns:1fr 1fr;height:44px">
+        <div>
+          <div style="height:14px;background:#1558B0"></div>
+          <div style="height:30px;background:#f5f5f0;padding:4px 3px;display:flex;gap:2px">
+            <div style="flex:1;background:#fff;border-radius:2px;border:0.5px solid #e5e5e0"></div>
+            <div style="flex:1;background:#E6F1FB;border-radius:2px"></div>
+          </div>
+        </div>
+        <div>
+          <div style="height:14px;background:#111"></div>
+          <div style="height:30px;background:#0d0d0d;padding:4px 3px;display:flex;gap:2px">
+            <div style="flex:1;background:#1e1e1e;border-radius:2px;border:0.5px solid #333"></div>
+            <div style="flex:1;background:#185FA5;border-radius:2px;opacity:.5"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="tp-info">
+      <div class="tp-name">Auto Day / Night</div>
+      <div class="tp-desc">Follows phone settings automatically</div>
+    </div>
+    <div class="tp-check off" id="chk-auto"><i class="ti ti-check"></i></div>
+  </div>
+
+  <div style="padding:12px 16px 0">
+    <div style="font-size:11px;color:var(--color-text-secondary);text-align:center">Theme is saved on this device</div>
+  </div>
+</div>
+</body>
+</html>
