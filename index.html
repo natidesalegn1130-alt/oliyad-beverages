@@ -134,98 +134,174 @@ window.loadStock = async () => {
   renderStock(list);
 };
 
-window.saveAdjustment = async () => {
-  const branchId  = document.getElementById("inp-adj-branch").value;
-  const productId = document.getElementById("inp-adj-product").value;
-  const type      = document.getElementById("inp-adj-type").value;
-  const qty       = parseInt(document.getElementById("inp-adj-qty").value);
-  const reason    = document.getElementById("inp-adj-reason").value;
-  const note      = document.getElementById("inp-adj-note").value.trim();
-  const hasDamage = document.getElementById("inp-adj-has-damage").checked;
-  if (!branchId || !productId || !qty) { alert("Fill all fields"); return; }
-  setLoading(true);
-  const db = window.DB; const FS = window.FS;
-  const stockId = branchId + "_" + productId;
-  const ref = FS.doc(db, "stock", stockId);
-  const snap = await FS.getDoc(ref);
+// ── MULTI-PRODUCT STOCK ADJUSTMENT ──────────────────────
+window._adjItems = []; // array of product rows
 
-  // Net qty to add to stock = received qty minus damaged qty
-  let dmgQty = 0;
-  if (hasDamage) {
-    dmgQty = parseInt(document.getElementById("inp-adj-dmg-qty").value) || 0;
-  }
-  const netQty = Math.max(0, qty - dmgQty);
-
-  if (snap.exists()) {
-    if (type === "set") {
-      await FS.updateDoc(ref, { quantity: netQty, updatedAt: FS.serverTimestamp() });
-    } else {
-      const delta = type === "add" ? netQty : -netQty;
-      await FS.updateDoc(ref, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp() });
-    }
-  } else {
-    await FS.setDoc(ref, { branchId, productId, quantity: netQty, updatedAt: FS.serverTimestamp() });
-  }
-
-  // Save stock movement record
-  const movementRef = await FS.addDoc(FS.collection(db, "stockMovements"), {
-    type: type === "add" ? "receipt" : "adjustment",
-    branchId, productId,
-    quantity: qty,
-    netQuantity: netQty,
-    reason, note,
-    hasDamage,
-    damagedQuantity: dmgQty,
-    createdBy: window.CURRENT_USER.uid,
-    createdAt: FS.serverTimestamp()
-  });
-
-  // If damage reported, also save a damage record linked to this stock-up
-  if (hasDamage && dmgQty > 0) {
-    const dmgReason  = document.getElementById("inp-adj-dmg-reason").value;
-    const dmgNote    = document.getElementById("inp-adj-dmg-note").value.trim();
-    const spillCount = parseInt(document.getElementById("inp-adj-dmg-spill").value) || 0;
-    const missCount  = parseInt(document.getElementById("inp-adj-dmg-missing").value) || 0;
-    const pkgDamage  = document.getElementById("inp-adj-dmg-pkg").checked;
-    await FS.addDoc(FS.collection(db, "damagedStock"), {
-      branchId, productId,
-      quantity: dmgQty,
-      reason: dmgReason,
-      note: dmgNote,
-      spillingItems: spillCount,
-      missingItems: missCount,
-      packagingDamaged: pkgDamage,
-      linkedStockMovement: movementRef.id,
-      reportedDuringStockUp: true,
-      reportedBy: window.CURRENT_USER.uid,
-      createdAt: FS.serverTimestamp()
-    });
-    // Notify CEO
-    await FS.addDoc(FS.collection(db, "notifications"), {
-      type: "damage",
-      title: "Damaged stock during receipt",
-      description: dmgQty + " cases damaged · " + dmgReason,
-      branchId, isRead: false, targetRole: "ceo",
-      createdAt: FS.serverTimestamp()
-    });
-  }
-
-  closeModal("modal-adjustment");
-  // Reset damage section
-  document.getElementById("inp-adj-has-damage").checked = false;
-  document.getElementById("stock-damage-section").style.display = "none";
-  loadStock();
-  setLoading(false);
+window.initAdjustment = () => {
+  window._adjItems = [];
+  addAdjProduct();
 };
 
-window.toggleStockDamageSection = () => {
-  const chk = document.getElementById("inp-adj-has-damage");
-  const sec = document.getElementById("stock-damage-section");
-  // Small delay so checkbox state updates first
+window.addAdjProduct = () => {
+  const idx = window._adjItems.length;
+  window._adjItems.push({ productId:"", qty:0, hasDamage:false, dmgQty:0, dmgReason:"transit_damage", dmgSpill:0, dmgMissing:0, dmgPkg:false, dmgNote:"" });
+  renderAdjProducts();
+};
+
+window.removeAdjProduct = (idx) => {
+  window._adjItems.splice(idx, 1);
+  if (window._adjItems.length === 0) addAdjProduct();
+  else renderAdjProducts();
+};
+
+window.renderAdjProducts = () => {
+  const db = window.DB;
+  const pOpts = (window._products||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join("");
+  const container = document.getElementById("adj-products-container");
+  if (!container) return;
+  container.innerHTML = window._adjItems.map((item, idx) => `
+    <div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:#f9f9f9;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #e5e5e0">
+        <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
+        ${window._adjItems.length > 1 ? `<button onclick="removeAdjProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>` : ""}
+      </div>
+      <div style="padding:10px 12px">
+        <div class="form-row">
+          <div class="form-field" style="flex:2">
+            <label>Product</label>
+            <select onchange="window._adjItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              <option value="">Select product…</option>
+              ${pOpts}
+            </select>
+          </div>
+          <div class="form-field" style="flex:1">
+            <label>Qty (cases)</label>
+            <input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          </div>
+        </div>
+        <!-- Damage toggle for this product -->
+        <div style="border:0.5px solid #f0d0d0;border-radius:8px;overflow:hidden;margin-top:4px">
+          <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;background:#fff8f8" onclick="toggleAdjDamage(${idx})">
+            <input type="checkbox" id="adj-dmg-chk-${idx}" style="width:16px;height:16px;cursor:pointer" onclick="event.stopPropagation();toggleAdjDamage(${idx})">
+            <div style="font-size:12px;font-weight:500;color:#E24B4A"><i class="ti ti-alert-triangle" style="font-size:13px;margin-right:4px"></i>Damaged / Lost goods included</div>
+          </div>
+          <div id="adj-dmg-sec-${idx}" style="display:none;padding:10px 12px;border-top:0.5px solid #f0d0d0;background:#fffafa">
+            <div style="font-size:11px;font-weight:600;color:#E24B4A;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Damage / Loss Report</div>
+            <div class="form-row">
+              <div class="form-field">
+                <label>Damaged cases</label>
+                <input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].dmgQty=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              </div>
+              <div class="form-field">
+                <label>Reason</label>
+                <select onchange="window._adjItems[${idx}].dmgReason=this.value" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:12px">
+                  <option value="spilling">Spilling (leaking)</option>
+                  <option value="missing_items">Missing items</option>
+                  <option value="packaging_damaged">Packaging damaged</option>
+                  <option value="spilling_and_missing">Spilling + Missing</option>
+                  <option value="transit_damage" selected>Transit damage</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-field"><label>Spilling items/case</label><input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].dmgSpill=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
+              <div class="form-field"><label>Missing items/case</label><input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].dmgMissing=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:#f9f9f9;border-radius:6px;margin-bottom:6px">
+              <input type="checkbox" id="adj-dmg-pkg-${idx}" onchange="window._adjItems[${idx}].dmgPkg=this.checked" style="width:14px;height:14px">
+              <label for="adj-dmg-pkg-${idx}" style="font-size:12px;cursor:pointer">Plastic / Cardboard packaging damaged</label>
+            </div>
+            <div class="form-field"><label>Damage Notes</label><textarea rows="2" placeholder="Describe damage…" oninput="window._adjItems[${idx}].dmgNote=this.value" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:12px;resize:none"></textarea></div>
+          </div>
+        </div>
+      </div>
+    </div>`).join("");
+};
+
+window.toggleAdjDamage = (idx) => {
+  const chk = document.getElementById("adj-dmg-chk-"+idx);
+  const sec = document.getElementById("adj-dmg-sec-"+idx);
   setTimeout(() => {
+    window._adjItems[idx].hasDamage = chk.checked;
     sec.style.display = chk.checked ? "block" : "none";
   }, 10);
 };
+
+window.saveAdjustment = async () => {
+  const branchId = document.getElementById("inp-adj-branch").value;
+  const type     = document.getElementById("inp-adj-type").value;
+  const reason   = document.getElementById("inp-adj-reason").value;
+  const note     = document.getElementById("inp-adj-note").value.trim();
+  if (!branchId) { alert("Please select a branch"); return; }
+  const valid = window._adjItems.filter(item => item.productId && item.qty > 0);
+  if (!valid.length) { alert("Add at least one product with quantity"); return; }
+
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  const branchName = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
+  const staffName = window.CURRENT_USER?.fullName || "Staff";
+
+  for (const item of valid) {
+    const prodName = (window._products||[]).find(p=>p.id===item.productId)?.name || "Product";
+    const dmgQty = item.hasDamage ? (item.dmgQty || 0) : 0;
+    const netQty = Math.max(0, item.qty - dmgQty);
+
+    // Update stock
+    const stockId = branchId + "_" + item.productId;
+    const ref = FS.doc(db, "stock", stockId);
+    const snap = await FS.getDoc(ref);
+    if (snap.exists()) {
+      if (type === "set") await FS.updateDoc(ref, { quantity: netQty, updatedAt: FS.serverTimestamp() });
+      else { const delta = type === "add" ? netQty : -netQty; await FS.updateDoc(ref, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp() }); }
+    } else {
+      await FS.setDoc(ref, { branchId, productId: item.productId, quantity: netQty, updatedAt: FS.serverTimestamp() });
+    }
+
+    // Save stock movement
+    const movRef = await FS.addDoc(FS.collection(db, "stockMovements"), {
+      type: type === "add" ? "receipt" : "adjustment",
+      branchId, productId: item.productId,
+      quantity: item.qty, netQuantity: netQty,
+      reason, note, hasDamage: item.hasDamage, damagedQuantity: dmgQty,
+      createdBy: window.CURRENT_USER.uid, createdAt: FS.serverTimestamp()
+    });
+
+    // If damage, save damage record + notification
+    if (item.hasDamage && dmgQty > 0) {
+      await FS.addDoc(FS.collection(db, "damagedStock"), {
+        branchId, productId: item.productId,
+        quantity: dmgQty, reason: item.dmgReason, note: item.dmgNote,
+        spillingItems: item.dmgSpill, missingItems: item.dmgMissing,
+        packagingDamaged: item.dmgPkg,
+        linkedStockMovement: movRef.id, reportedDuringStockUp: true,
+        reportedBy: window.CURRENT_USER.uid, createdAt: FS.serverTimestamp()
+      });
+      await FS.addDoc(FS.collection(db, "notifications"), {
+        type: "damage",
+        title: "Damage during stock-up — " + branchName,
+        description: prodName + " · Received: " + item.qty + " cases · Damaged: " + dmgQty + " (" + item.dmgReason.replace(/_/g," ") + ") · Net stocked: " + netQty + " · By " + staffName,
+        branchId, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
+      });
+    } else {
+      // Stock-up notification (no damage)
+      await FS.addDoc(FS.collection(db, "notifications"), {
+        type: "stock",
+        title: "Stock received — " + branchName,
+        description: prodName + " · " + netQty + " cases · " + reason.replace(/_/g," ") + " · By " + staffName,
+        branchId, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
+      });
+    }
+  }
+
+  closeModal("modal-adjustment");
+  window._adjItems = [];
+  loadStock();
+  setLoading(false);
+  alert("✓ " + valid.length + " product(s) saved successfully!");
+};
+
+window.toggleStockDamageSection = () => {};
 
 window.loadOrders = async () => {
   const u = window.CURRENT_USER;
@@ -374,7 +450,18 @@ window.saveOrder = async () => {
       createdAt: FS.serverTimestamp()
     });
   }
-  await FS.addDoc(FS.collection(db, "notifications"), { type: "order", title: "New order — " + window._orderItems.length + " products", description: "ETB " + total.toLocaleString() + " · " + payment, branchId, referenceId: orderRef.id, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp() });
+  {
+    const custName = isWalkin ? "Walk-in customer" : ((window._customers||[]).find(c=>c.id===customerId)?.name || "Customer");
+    const branchName = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
+    const itemsList = window._orderItems.map(i=>i.qty+"x "+i.productName).join(", ");
+    const payLabel = {cash:"Cash",bank:"Bank",credit:"Full Credit",partial:"Partial Payment"}[payment]||payment;
+    await FS.addDoc(FS.collection(db, "notifications"), {
+      type: "order",
+      title: "New order from " + custName,
+      description: branchName + " · ETB " + total.toLocaleString() + " · " + payLabel + " · " + itemsList,
+      branchId, referenceId: orderRef.id, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
+    });
+  }
   window._orderItems = [];
   closeModal("modal-order");
   loadOrders();
@@ -449,7 +536,16 @@ window.saveExpense = async () => {
   if (!branchId || !amount) { alert("Fill all fields"); return; }
   setLoading(true);
   await addDoc(collection(db, "expenses"), { branchId, category, amount, description: note, recordedBy: window.CURRENT_USER.uid, createdAt: serverTimestamp() });
-  await addDoc(collection(db, "notifications"), { type: "expense", title: "Expense: " + category + " ETB " + amount, description: note, branchId, isRead: false, targetRole: "ceo", createdAt: serverTimestamp() });
+  {
+    const branchName2 = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
+    const staffName = window.CURRENT_USER?.fullName || "Staff";
+    await addDoc(collection(db, "notifications"), {
+      type: "expense",
+      title: "Expense recorded — " + category.charAt(0).toUpperCase()+category.slice(1),
+      description: branchName2 + " · ETB " + amount.toLocaleString() + " · By " + staffName + (note?" · "+note:""),
+      branchId, isRead: false, targetRole: "ceo", createdAt: serverTimestamp()
+    });
+  }
   closeModal("modal-expense");
   loadExpenses();
   setLoading(false);
@@ -469,7 +565,18 @@ window.saveTransfer = async () => {
   const toSnap = await getDoc(toRef);
   if (toSnap.exists()) { await updateDoc(toRef, { quantity: increment(qty), updatedAt: serverTimestamp() }); }
   else { await setDoc(toRef, { branchId: toBranch, productId, quantity: qty, updatedAt: serverTimestamp() }); }
-  await addDoc(collection(db, "notifications"), { type: "transfer", title: "Stock transfer sent", description: qty + " units transferred", branchId: fromBranch, isRead: false, targetRole: "ceo", createdAt: serverTimestamp() });
+  {
+    const fromName = (window._branches||[]).find(b=>b.id===fromBranch)?.name || "Branch";
+    const toName = (window._branches||[]).find(b=>b.id===toBranch)?.name || "Branch";
+    const prodName = (window._products||[]).find(p=>p.id===productId)?.name || "Product";
+    const staffName2 = window.CURRENT_USER?.fullName || "Staff";
+    await addDoc(collection(db, "notifications"), {
+      type: "transfer",
+      title: "Stock transfer: " + fromName + " → " + toName,
+      description: qty + "x " + prodName + " · By " + staffName2,
+      branchId: fromBranch, isRead: false, targetRole: "ceo", createdAt: serverTimestamp()
+    });
+  }
   closeModal("modal-transfer");
   loadStock();
   setLoading(false);
@@ -485,7 +592,18 @@ window.saveDamage = async () => {
   setLoading(true);
   await addDoc(collection(db, "damagedStock"), { branchId, productId, quantity: qty, reason, note, reportedBy: window.CURRENT_USER.uid, createdAt: serverTimestamp() });
   await updateDoc(doc(db, "stock", branchId + "_" + productId), { quantity: increment(-qty), updatedAt: serverTimestamp() });
-  await addDoc(collection(db, "notifications"), { type: "damage", title: "Damaged stock reported", description: qty + " units - " + reason, branchId, isRead: false, targetRole: "ceo", createdAt: serverTimestamp() });
+  {
+    const branchName3 = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
+    const prodName2 = (window._products||[]).find(p=>p.id===productId)?.name || "Product";
+    const staffName3 = window.CURRENT_USER?.fullName || "Staff";
+    const reasonLabel = reason.replace(/_/g," ");
+    await addDoc(collection(db, "notifications"), {
+      type: "damage",
+      title: "Damage reported — " + branchName3,
+      description: qty + "x " + prodName2 + " · Reason: " + reasonLabel + " · By " + staffName3,
+      branchId, isRead: false, targetRole: "ceo", createdAt: serverTimestamp()
+    });
+  }
   closeModal("modal-damage");
   loadStock();
   setLoading(false);
@@ -1213,16 +1331,16 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
   <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveTransfer()"><i class="ti ti-check"></i> Send Transfer</button>
 </div></div>
 
-<div class="modal-bg" id="modal-adjustment"><div class="modal" style="max-width:400px">
+<div class="modal-bg" id="modal-adjustment"><div class="modal" style="max-width:420px;max-height:90vh;overflow-y:auto">
   <div class="modal-title">Stock Up / Adjustment <button onclick="closeModal('modal-adjustment')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
 
-  <div style="background:var(--color-background-secondary);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--color-text-secondary)">
-    <i class="ti ti-info-circle" style="font-size:14px;vertical-align:-2px" aria-hidden="true"></i>
-    Fill this form when receiving stock from factory or transferring between branches.
+  <div style="background:#f0f7ff;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#0C447C">
+    <i class="ti ti-info-circle" style="font-size:14px;vertical-align:-2px"></i>
+    Fill this form when receiving stock. Add multiple products in one go.
   </div>
 
-  <div class="form-field"><label>Branch</label><select id="inp-adj-branch"><option value="">Select…</option></select></div>
-  <div class="form-field"><label>Product</label><select id="inp-adj-product"><option value="">Select…</option></select></div>
+  <!-- Shared fields: branch, type, reason, note -->
+  <div class="form-field"><label>Branch</label><select id="inp-adj-branch"><option value="">Select branch…</option></select></div>
   <div class="form-row">
     <div class="form-field"><label>Type</label>
       <select id="inp-adj-type">
@@ -1231,61 +1349,29 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
         <option value="set">Set Exact Count</option>
       </select>
     </div>
-    <div class="form-field"><label>Quantity (cases)</label><input id="inp-adj-qty" type="number" placeholder="0" min="0"></div>
-  </div>
-  <div class="form-field"><label>Source / Reason</label>
-    <select id="inp-adj-reason">
-      <option value="factory_receipt">Received from Factory</option>
-      <option value="branch_transfer">Received from Branch</option>
-      <option value="return">Customer Return</option>
-      <option value="physical_count">Physical Count Correction</option>
-      <option value="opening_stock">Opening Stock</option>
-      <option value="other">Other</option>
-    </select>
+    <div class="form-field"><label>Source / Reason</label>
+      <select id="inp-adj-reason">
+        <option value="factory_receipt">From Factory</option>
+        <option value="branch_transfer">From Branch</option>
+        <option value="return">Customer Return</option>
+        <option value="physical_count">Count Correction</option>
+        <option value="opening_stock">Opening Stock</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
   </div>
   <div class="form-field"><label>Note (optional)</label><input id="inp-adj-note" type="text" placeholder="e.g. Supplier name, batch info…"></div>
 
-  <!-- DAMAGED GOODS TOGGLE -->
-  <div style="border:0.5px solid var(--color-border-secondary);border-radius:8px;overflow:hidden;margin-bottom:12px">
-    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;background:var(--color-background-secondary)" onclick="toggleStockDamageSection()">
-      <input type="checkbox" id="inp-adj-has-damage" style="width:17px;height:17px;cursor:pointer" onclick="event.stopPropagation();toggleStockDamageSection()">
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:500;color:var(--color-text-primary)"><i class="ti ti-alert-triangle" style="font-size:14px;color:#E24B4A;margin-right:4px" aria-hidden="true"></i>Damaged / Lost goods included</div>
-        <div style="font-size:11px;color:var(--color-text-secondary);margin-top:1px">Tick if any products arrived damaged, missing or lost in transit</div>
-      </div>
-    </div>
+  <!-- Product rows (multi-product) -->
+  <div style="font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Products Being Stocked</div>
+  <div id="adj-products-container"></div>
 
-    <!-- DAMAGE SECTION (hidden by default) -->
-    <div id="stock-damage-section" style="display:none;padding:12px;border-top:0.5px solid var(--color-border-tertiary)">
-      <div style="font-size:12px;font-weight:500;color:#E24B4A;margin-bottom:10px;text-transform:uppercase;letter-spacing:.4px">Damage / Loss Report</div>
-      <div class="form-row">
-        <div class="form-field"><label>Damaged Qty (cases)</label><input id="inp-adj-dmg-qty" type="number" placeholder="0" min="0"></div>
-        <div class="form-field"><label>Reason</label>
-          <select id="inp-adj-dmg-reason">
-            <option value="spilling">Spilling (leaking)</option>
-            <option value="missing_items">Missing items</option>
-            <option value="packaging_damaged">Packaging damaged</option>
-            <option value="spilling_and_missing">Spilling + Missing</option>
-            <option value="transit_damage">Transit damage</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-      </div>
-      <div id="adj-spill-section">
-        <div class="form-row">
-          <div class="form-field"><label>Spilling items/case</label><input id="inp-adj-dmg-spill" type="number" placeholder="0" min="0"></div>
-          <div class="form-field"><label>Missing items/case</label><input id="inp-adj-dmg-missing" type="number" placeholder="0" min="0"></div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--color-background-secondary);border-radius:6px;margin-bottom:8px">
-        <input type="checkbox" id="inp-adj-dmg-pkg" style="width:15px;height:15px">
-        <label for="inp-adj-dmg-pkg" style="font-size:12px;cursor:pointer">Plastic / Cardboard packaging damaged</label>
-      </div>
-      <div class="form-field"><label>Damage Notes</label><textarea id="inp-adj-dmg-note" rows="2" placeholder="Describe damage in detail…"></textarea></div>
-    </div>
-  </div>
+  <!-- Add another product button -->
+  <button onclick="addAdjProduct()" style="width:100%;padding:9px;border:1.5px dashed #85B7EB;border-radius:8px;background:#f0f7ff;color:#1558B0;font-size:13px;font-weight:500;cursor:pointer;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:6px">
+    <i class="ti ti-plus" style="font-size:16px"></i> Add Another Product
+  </button>
 
-  <button class="btn btn-primary" style="width:100%" onclick="saveAdjustment()"><i class="ti ti-check"></i> Save Stock Record</button>
+  <button class="btn btn-primary" style="width:100%" onclick="saveAdjustment()"><i class="ti ti-check"></i> Save All Stock Records</button>
 </div></div>
 
 <script>
@@ -1336,6 +1422,7 @@ function switchTab(btn,tabId){
 }
 function openModal(id){
   document.getElementById(id).classList.add("open");
+  if(id==="modal-adjustment") initAdjustment();
   if(id==="modal-order") initOrderForm();
   if(id==="modal-set-price"){
     const branches=window._branches||[]; const products=window._products||[];
@@ -1398,8 +1485,11 @@ async function loadDashboard(){
     const typeIcon={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],low_stock:["ni-stock","ti-alert-triangle"]};
     let html="";
     nSnap.forEach(d=>{ const n=d.data(); const [cls,ico]=(typeIcon[n.type]||["ni-order","ti-file-invoice"]);
-      const t=n.createdAt&&n.createdAt.toDate?()=>{ const diff=Math.round((Date.now()-n.createdAt.toDate())/60000); return diff<60?diff+"m ago":Math.round(diff/60)+"h ago"; }:()=>"";
-      html+=`<div class="notif-item"><div class="ni ${cls}"><i class="ti ${ico}"></i></div><div class="notif-text"><div class="notif-title">${n.title}</div><div class="notif-desc">${n.description||""}</div></div><div class="notif-time">${t()}</div></div>`;
+      const dt=n.createdAt&&n.createdAt.toDate?n.createdAt.toDate():new Date();
+      const diff=Math.round((Date.now()-dt)/60000);
+      const relTime=diff<60?diff+"m ago":diff<1440?Math.round(diff/60)+"h ago":Math.round(diff/1440)+"d ago";
+      const fullDate=dt.toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+      html+=`<div class="notif-item"><div class="ni ${cls}"><i class="ti ${ico}"></i></div><div class="notif-text"><div class="notif-title">${n.title}</div><div class="notif-desc">${n.description||""}</div><div style="font-size:11px;color:#999;margin-top:3px"><i class="ti ti-clock" style="font-size:10px"></i> ${fullDate} · ${relTime}</div></div></div>`;
     });
     document.getElementById("dash-activity").innerHTML=html||'<div class="empty-state">No activity yet</div>';
 
@@ -1574,7 +1664,7 @@ async function loadMovements(){
 
 function renderNotifications(list){
   const ti={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],low_stock:["ni-stock","ti-alert-triangle"]};
-  document.getElementById("notif-list").innerHTML=list.length?list.map(n=>{ const [cls,ico]=(ti[n.type]||["ni-order","ti-file-invoice"]); const d=n.createdAt&&n.createdAt.toDate?n.createdAt.toDate():new Date(); const diff=Math.round((Date.now()-d)/60000); const time=diff<60?diff+"m ago":diff<1440?Math.round(diff/60)+"h ago":Math.round(diff/1440)+"d ago"; return `<div class="notif-item" style="${n.isRead?"opacity:.6":""}"><div class="ni ${cls}"><i class="ti ${ico}"></i></div><div class="notif-text"><div class="notif-title">${n.title}</div><div class="notif-desc">${n.description||""}</div></div><div class="notif-time">${time}</div></div>`; }).join(""):'<div class="empty-state">No notifications yet.</div>';
+  document.getElementById("notif-list").innerHTML=list.length?list.map(n=>{ const [cls,ico]=(ti[n.type]||["ni-order","ti-file-invoice"]); const dt=n.createdAt&&n.createdAt.toDate?n.createdAt.toDate():new Date(); const diff=Math.round((Date.now()-dt)/60000); const relTime=diff<60?diff+"m ago":diff<1440?Math.round(diff/60)+"h ago":Math.round(diff/1440)+"d ago"; const fullDate=dt.toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); return `<div class="notif-item" style="${n.isRead?"opacity:.6":""}"><div class="ni ${cls}"><i class="ti ${ico}"></i></div><div class="notif-text"><div class="notif-title">${n.title}</div><div class="notif-desc">${n.description||""}</div><div style="font-size:11px;color:#999;margin-top:3px"><i class="ti ti-clock" style="font-size:10px"></i> ${fullDate} · ${relTime}</div></div></div>`; }).join(""):'<div class="empty-state">No notifications yet.</div>';
 }
 
 function renderStaff(list){
@@ -1986,9 +2076,10 @@ window.loadBranchDetailCredit = async (branchId) => {
 
 window.loadBranchDetailOrders = async (branchId) => {
   const db = window.DB; const FS = window.FS;
-  const snaps = await FS.getDocs(FS.query(FS.collection(db,"orders"), FS.where("branchId","==",branchId), FS.orderBy("createdAt","desc"), FS.limit(20)));
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"orders"), FS.where("branchId","==",branchId)));
   const cMap = {}; (window._customers||[]).forEach(c => cMap[c.id] = c.name);
   const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
   const sb = { paid:"bg", unpaid:"ba", partial:"bb", credit:"br" };
   document.getElementById("bdt-orders").innerHTML = list.length ? `<table class="tbl">
     <colgroup><col style="width:34%"><col style="width:28%"><col style="width:18%"><col style="width:20%"></colgroup>
@@ -1999,8 +2090,9 @@ window.loadBranchDetailOrders = async (branchId) => {
 
 window.loadBranchDetailExpenses = async (branchId) => {
   const db = window.DB; const FS = window.FS;
-  const snaps = await FS.getDocs(FS.query(FS.collection(db,"expenses"), FS.where("branchId","==",branchId), FS.orderBy("createdAt","desc"), FS.limit(20)));
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"expenses"), FS.where("branchId","==",branchId)));
   const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
   const cb = { fuel:"ba", salary:"bb", rent:"bgr", utilities:"bgr", other:"bgr" };
   document.getElementById("bdt-expenses").innerHTML = list.length ? `<table class="tbl">
     <colgroup><col style="width:34%"><col style="width:26%"><col style="width:40%"></colgroup>
@@ -2033,9 +2125,10 @@ window.switchCustDetailTab = (btn, tabId) => {
 
 window.loadCustDetailOrders = async (customerId) => {
   const db = window.DB; const FS = window.FS;
-  const snaps = await FS.getDocs(FS.query(FS.collection(db,"orders"), FS.where("customerId","==",customerId), FS.orderBy("createdAt","desc"), FS.limit(30)));
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"orders"), FS.where("customerId","==",customerId)));
   const bMap = {}; (window._branches||[]).forEach(b => bMap[b.id] = b.name);
   const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
   const sb = { paid:"bg", unpaid:"ba", partial:"bb", credit:"br" };
   document.getElementById("cdt-orders").innerHTML = list.length ? list.map(o => `
     <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
@@ -2051,11 +2144,12 @@ window.loadCustDetailOrders = async (customerId) => {
 
 window.loadCustDetailPayments = async (customerId) => {
   const db = window.DB; const FS = window.FS;
-  const snaps = await FS.getDocs(FS.query(FS.collection(db,"payments"), FS.where("customerId","==",customerId), FS.orderBy("createdAt","desc"), FS.limit(30)));
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"payments"), FS.where("customerId","==",customerId)));
   const sMap = {}; // staff map
   const sSnaps = await FS.getDocs(FS.collection(db,"staff"));
   sSnaps.forEach(d => sMap[d.id] = d.data().fullName);
   const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
   document.getElementById("cdt-payments").innerHTML = list.length ? list.map(p => `
     <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
       <div style="display:flex;justify-content:space-between;margin-bottom:2px">
@@ -2070,10 +2164,11 @@ window.loadCustDetailPayments = async (customerId) => {
 
 window.loadCustDetailCreditLog = async (customerId) => {
   const db = window.DB; const FS = window.FS;
-  const snaps = await FS.getDocs(FS.query(FS.collection(db,"creditLog"), FS.where("customerId","==",customerId), FS.orderBy("createdAt","desc"), FS.limit(30)));
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"creditLog"), FS.where("customerId","==",customerId)));
   const sSnaps = await FS.getDocs(FS.collection(db,"staff"));
   const sMap = {}; sSnaps.forEach(d => sMap[d.id] = d.data().fullName);
   const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
   const actionColors = { given:"br", arrested:"bg", adjusted:"ba", increased:"bb" };
   document.getElementById("cdt-credit").innerHTML = list.length ? list.map(c => `
     <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
@@ -2181,14 +2276,43 @@ window.savePayment = async () => {
       await FS.updateDoc(oRef, { paidAmount: newPaid, paymentStatus: status, updatedAt: FS.serverTimestamp() });
     }
   }
-  // Update customer outstanding
+  // Update customer outstanding balance + notification + credit log
   if (customerId) {
     const cRef = FS.doc(db, "customers", customerId);
     const cSnap = await FS.getDoc(cRef);
     if (cSnap.exists()) {
-      const c = cSnap.data();
-      const newBal = Math.max(0, (c.outstandingBalance||0) - amount);
+      const cData = cSnap.data();
+      const prevBal = cData.outstandingBalance || 0;
+      const creditDeducted = Math.min(amount, prevBal);
+      const newBal = Math.max(0, prevBal - amount);
       await FS.updateDoc(cRef, { outstandingBalance: newBal });
+
+      // Log to creditLog if credit was deducted
+      if (creditDeducted > 0) {
+        await FS.addDoc(FS.collection(db, "creditLog"), {
+          customerId, action: "arrested", amount: creditDeducted,
+          note: "Payment received · " + method,
+          doneBy: window.CURRENT_USER.uid,
+          branchId: branchId || null,
+          createdAt: FS.serverTimestamp()
+        });
+      }
+
+      // Payment notification
+      const custName = cData.name || "Customer";
+      const branchName = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
+      const staffName = window.CURRENT_USER?.fullName || "Staff";
+      const methodLabel = {cash:"Cash",bank_transfer:"Bank Transfer",mobile_money:"Mobile Money"}[method]||method;
+      const balanceMsg = creditDeducted > 0
+        ? " · Credit balance: ETB " + newBal.toLocaleString()
+        : "";
+      await FS.addDoc(FS.collection(db, "notifications"), {
+        type: "payment",
+        title: "Payment received from " + custName,
+        description: "ETB " + amount.toLocaleString() + " · " + methodLabel + " · " + branchName + " · By " + staffName + balanceMsg,
+        branchId, isRead: false, targetRole: "ceo",
+        createdAt: FS.serverTimestamp()
+      });
     }
   }
   closeModal("modal-payment");
