@@ -696,7 +696,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#1a
 .notif-item:last-child{border-bottom:none}
 .ni{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px}
 .ni-order{background:#E6F1FB;color:#185FA5}.ni-transfer{background:#E1F5EE;color:#0F6E56}
-.ni-damage{background:#FCEBEB;color:#A32D2D}.ni-payment{background:#EAF3DE;color:#3B6D11}
+.ni-damage{background:#FCEBEB;color:#A32D2D}.ni-payment{background:#EAF3DE;color:#3B6D11}.ni-stock{background:#FAEEDA;color:#854F0B}.ni-expense{background:#FAEEDA;color:#854F0B}
 .ni-expense{background:#FAEEDA;color:#854F0B}.ni-stock{background:#FAEEDA;color:#854F0B}
 .notif-text{flex:1}
 .notif-title{font-size:13px;font-weight:500;margin-bottom:2px}
@@ -1461,7 +1461,7 @@ async function loadDashboard(){
     document.getElementById("dash-unpaid").textContent=unpaid;
     document.getElementById("dash-lowstock").textContent=lowStock;
     document.getElementById("dash-customers").textContent=cSnap.size;
-    const typeIcon={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],low_stock:["ni-stock","ti-alert-triangle"]};
+    const typeIcon={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],stock:["ni-stock","ti-package"],low_stock:["ni-stock","ti-alert-triangle"]};
     let html="";
     nSnap.forEach(d=>{ const n=d.data(); const [cls,ico]=(typeIcon[n.type]||["ni-order","ti-file-invoice"]);
       const dt=n.createdAt&&n.createdAt.toDate?n.createdAt.toDate():new Date();
@@ -1642,7 +1642,7 @@ async function loadMovements(){
 }
 
 function renderNotifications(list){
-  const ti={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],low_stock:["ni-stock","ti-alert-triangle"]};
+  const ti={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],stock:["ni-stock","ti-package"],low_stock:["ni-stock","ti-alert-triangle"]};
   document.getElementById("notif-list").innerHTML=list.length?list.map(n=>{ const [cls,ico]=(ti[n.type]||["ni-order","ti-file-invoice"]); const dt=n.createdAt&&n.createdAt.toDate?n.createdAt.toDate():new Date(); const diff=Math.round((Date.now()-dt)/60000); const relTime=diff<60?diff+"m ago":diff<1440?Math.round(diff/60)+"h ago":Math.round(diff/1440)+"d ago"; const fullDate=dt.toLocaleString("en-GB",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); return `<div class="notif-item" style="${n.isRead?"opacity:.6":""}"><div class="ni ${cls}"><i class="ti ${ico}"></i></div><div class="notif-text"><div class="notif-title">${n.title}</div><div class="notif-desc">${n.description||""}</div><div style="font-size:11px;color:#999;margin-top:3px"><i class="ti ti-clock" style="font-size:10px"></i> ${fullDate} · ${relTime}</div></div></div>`; }).join(""):'<div class="empty-state">No notifications yet.</div>';
 }
 
