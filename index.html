@@ -639,29 +639,7 @@ window.startRealtimeListeners = () => {
   });
 };
 
-window.savePayment = async () => {
-  const orderId    = document.getElementById("inp-pay-order").value.trim();
-  const customerId = document.getElementById("inp-pay-customer").value;
-  const branchId   = document.getElementById("inp-pay-branch").value;
-  const amount     = parseFloat(document.getElementById("inp-pay-amount").value);
-  const method     = document.getElementById("inp-pay-method").value;
-  if (!customerId || !amount || !branchId) { alert("Fill all fields"); return; }
-  setLoading(true);
-  await addDoc(collection(db, "payments"), { orderId: orderId || null, customerId, branchId, amount, method, receivedBy: window.CURRENT_USER.uid, createdAt: serverTimestamp() });
-  if (orderId) {
-    const oRef = doc(db, "orders", orderId);
-    const oSnap = await getDoc(oRef);
-    if (oSnap.exists()) {
-      const o = oSnap.data();
-      const newPaid = (o.paidAmount || 0) + amount;
-      const status  = newPaid >= o.totalAmount ? "paid" : "partial";
-      await updateDoc(oRef, { paidAmount: newPaid, paymentStatus: status, updatedAt: serverTimestamp() });
-    }
-  }
-  closeModal("modal-payment");
-  loadOrders();
-  setLoading(false);
-};
+// savePayment defined below with full credit deduction + notification
 </script>
 
 <style>
@@ -2248,8 +2226,7 @@ window.saveCreditAction = async () => {
 // ══════════════════════════════════════════════════════════
 // 8. PAYMENT WITH BANK TRANSFER TO / HANDLED BY
 // ══════════════════════════════════════════════════════════
-// Updated in savePayment - add transferTo and handledBy fields
-window._originalSavePayment = window.savePayment;
+// savePayment - with credit deduction, notification, and bank transfer support
 window.savePayment = async () => {
   const orderId    = document.getElementById("inp-pay-order").value.trim();
   const customerId = document.getElementById("inp-pay-customer").value;
