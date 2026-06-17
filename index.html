@@ -610,9 +610,10 @@ window.saveDamage = async () => {
 };
 
 window.loadNotifications = async () => {
-  const snaps = await getDocs(query(collection(db, "notifications"), orderBy("createdAt","desc"), limit(50)));
+  const snaps = await getDocs(query(collection(db, "notifications"), limit(100)));
   const list = [];
   snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
   renderNotifications(list);
 };
 
