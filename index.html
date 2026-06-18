@@ -242,6 +242,10 @@ window.saveAdjustment = async () => {
   const branchName = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
   const staffName = window.CURRENT_USER?.fullName || "Staff";
 
+  const stockSummary = [];
+  let totalCases = 0;
+  let hasDamageOverall = false;
+
   for (const item of valid) {
     const prodName = (window._products||[]).find(p=>p.id===item.productId)?.name || "Product";
     const dmgQty = item.hasDamage ? (item.dmgQty || 0) : 0;
@@ -267,7 +271,7 @@ window.saveAdjustment = async () => {
       createdBy: window.CURRENT_USER.uid, createdAt: FS.serverTimestamp()
     });
 
-    // If damage, save damage record + notification
+    // collect summary for combined notification
     if (item.hasDamage && dmgQty > 0) {
       await FS.addDoc(FS.collection(db, "damagedStock"), {
         branchId, productId: item.productId,
@@ -277,22 +281,21 @@ window.saveAdjustment = async () => {
         linkedStockMovement: movRef.id, reportedDuringStockUp: true,
         reportedBy: window.CURRENT_USER.uid, createdAt: FS.serverTimestamp()
       });
-      await FS.addDoc(FS.collection(db, "notifications"), {
-        type: "damage",
-        title: "Damage during stock-up — " + branchName,
-        description: prodName + " · Received: " + item.qty + " cases · Damaged: " + dmgQty + " (" + item.dmgReason.replace(/_/g," ") + ") · Net stocked: " + netQty + " · By " + staffName,
-        branchId, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
-      });
+      stockSummary.push(prodName + " · " + item.qty + " rcvd, " + dmgQty + " dmg (" + item.dmgReason.replace(/_/g," ") + "), net " + netQty);
+      hasDamageOverall = true;
     } else {
-      // Stock-up notification (no damage)
-      await FS.addDoc(FS.collection(db, "notifications"), {
-        type: "stock",
-        title: "Stock received — " + branchName,
-        description: prodName + " · " + netQty + " cases · " + reason.replace(/_/g," ") + " · By " + staffName,
-        branchId, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
-      });
+      stockSummary.push(prodName + " · " + netQty + " cases");
     }
+    totalCases += netQty;
   }
+
+  // Send ONE combined notification for all products
+  await FS.addDoc(FS.collection(db, "notifications"), {
+    type: hasDamageOverall ? "damage" : "stock",
+    title: (hasDamageOverall ? "Stock received (with damage) — " : "Stock received — ") + branchName,
+    description: stockSummary.join(" | ") + " · Total: " + totalCases + " cases · " + reason.replace(/_/g," ") + " · By " + staffName,
+    branchId, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
+  });
 
   closeModal("modal-adjustment");
   window._adjItems = [];
@@ -329,6 +332,8 @@ window.initOrderForm = async () => {
   window._orderItems = [];
   renderOrderItems();
   document.getElementById("order-grand-total").textContent = "ETB 0.00";
+  const wf=document.getElementById("walkin-name-field"); if(wf) wf.style.display="none";
+  const wn=document.getElementById("inp-walkin-name"); if(wn) wn.value="";
 };
 
 window.addOrderItem = async () => {
@@ -415,9 +420,11 @@ window.saveOrder = async () => {
     paymentStatus = partialAmount > 0 ? "partial" : "credit";
   } else if (payment === "bank") { paidAmount = total; paymentStatus = "paid"; }
   const isWalkin = customerId === "walkin";
+  const walkinName = isWalkin ? (document.getElementById("inp-walkin-name")?.value.trim() || "") : "";
   const orderRef = await FS.addDoc(FS.collection(db, "orders"), {
     customerId: isWalkin ? "walkin" : customerId,
     isWalkin,
+    walkinName: isWalkin ? walkinName : null,
     branchId, paymentMethod: payment,
     totalAmount: total, paidAmount,
     creditGiven, paymentStatus,
@@ -451,7 +458,7 @@ window.saveOrder = async () => {
     });
   }
   {
-    const custName = isWalkin ? "Walk-in customer" : ((window._customers||[]).find(c=>c.id===customerId)?.name || "Customer");
+    const custName = isWalkin ? (walkinName || "Walk-in Customer") : ((window._customers||[]).find(c=>c.id===customerId)?.name || "Customer");
     const branchName = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
     const itemsList = window._orderItems.map(i=>i.qty+"x "+i.productName).join(", ");
     const payLabel = {cash:"Cash",bank:"Bank",credit:"Full Credit",partial:"Partial Payment"}[payment]||payment;
@@ -469,6 +476,13 @@ window.saveOrder = async () => {
 };
 
 // Toggle partial payment field
+window.toggleWalkinName = () => {
+  const val = document.getElementById("inp-order-customer").value;
+  const field = document.getElementById("walkin-name-field");
+  if (field) field.style.display = val === "walkin" ? "block" : "none";
+  if (val !== "walkin") { const n=document.getElementById("inp-walkin-name"); if(n) n.value=""; }
+};
+
 window.togglePartialPayment = () => {
   const v = document.getElementById("inp-order-payment").value;
   document.getElementById("partial-payment-field").style.display = v === "partial" ? "block" : "none";
@@ -1178,7 +1192,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
   <div class="modal-title">New Order <button onclick="closeModal('modal-order')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
   <div class="form-row">
     <div class="form-field"><label>Customer</label>
-      <select id="inp-order-customer">
+      <select id="inp-order-customer" onchange="toggleWalkinName()">
         <option value="">Select customer…</option>
         <option value="walkin">👤 Walk-in / One-time Customer</option>
       </select>
@@ -1191,6 +1205,9 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
         <option value="partial">Half / Partial</option>
       </select>
     </div>
+  </div>
+  <div id="walkin-name-field" style="display:none;margin-bottom:8px">
+    <div class="form-field" style="margin:0"><label>Customer Name <span style="color:#999;font-weight:400">(optional)</span></label><input id="inp-walkin-name" type="text" placeholder="e.g. Abebe Kebede or leave blank"></div>
   </div>
   <div id="partial-payment-field" style="display:none">
     <div class="form-field"><label>Amount Paid Now (ETB)</label><input id="inp-order-partial-amount" type="number" placeholder="0" style="border-color:#EF9F27"></div>
