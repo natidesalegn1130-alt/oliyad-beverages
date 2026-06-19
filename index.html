@@ -114,10 +114,12 @@ window.saveProduct = async () => {
     else if (nu.startsWith("MIRINDA")) brand = "Mirinda";
     else brand = cat;
   }
+  const expiryDate = document.getElementById("inp-prod-expiry").value || null;
   if (!name || !sku || !unit) { alert("Fill in all fields"); return; }
   setLoading(true);
-  await addDoc(collection(db, "products"), { name, sku, unit, category: cat, brand, isActive: true, createdAt: serverTimestamp() });
+  await addDoc(collection(db, "products"), { name, sku, unit, category: cat, brand, expiryDate, isActive: true, createdAt: serverTimestamp() });
   closeModal("modal-product");
+  document.getElementById("inp-prod-expiry").value = "";
   window._selectedBrand = brand;
   loadProducts();
   setLoading(false);
@@ -1014,6 +1016,12 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
           <div class="dash-card-value" id="dash-online-count" style="font-size:22px">—</div>
           <div class="dash-card-sub">Staff online</div>
         </div>
+        <div class="dash-card" onclick="navTo('stock')">
+          <div class="dash-card-icon" style="background:#FAEEDA;color:#854F0B"><i class="ti ti-calendar-exclamation"></i></div>
+          <div class="dash-card-label">Expiring Soon</div>
+          <div class="dash-card-value" id="dash-expiring" style="color:#854F0B">—</div>
+          <div class="dash-card-sub">Within 3 months</div>
+        </div>
       </div>
 
       <div class="card"><div class="card-title">Recent Activity</div><div id="dash-activity"><div class="empty-state">Loading…</div></div></div>
@@ -1179,6 +1187,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
   </div>
   <div class="form-field"><label>Brand</label><input id="inp-prod-brand" type="text" placeholder="e.g. KK, Pepsi, Coca-Cola, Ambo"></div>
   <div class="form-field"><label>Category</label><select id="inp-prod-cat"><option>Juice</option><option>Water</option><option>Soda</option><option>Other</option></select></div>
+  <div class="form-field"><label>Expiry Date <span style="color:#999;font-weight:400">(optional)</span></label><input id="inp-prod-expiry" type="date"></div>
   <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveProduct()"><i class="ti ti-check"></i> Save Product</button>
 </div></div>
 
@@ -1484,6 +1493,13 @@ async function loadDashboard(){
     document.getElementById("dash-unpaid").textContent=unpaid;
     document.getElementById("dash-lowstock").textContent=lowStock;
     document.getElementById("dash-customers").textContent=cSnap.size;
+    try {
+      const pSnap = await FS.getDocs(FS.collection(db,"products"));
+      const today2 = new Date(); const threeMo = new Date(); threeMo.setMonth(threeMo.getMonth()+3);
+      let expiringCount = 0;
+      pSnap.forEach(d => { const ed = d.data().expiryDate; if (ed) { const exp = new Date(ed); if (exp >= today2 && exp <= threeMo) expiringCount++; } });
+      const expEl = document.getElementById("dash-expiring"); if (expEl) expEl.textContent = expiringCount;
+    } catch(e) { console.error(e); }
     const typeIcon={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],stock:["ni-stock","ti-package"],low_stock:["ni-stock","ti-alert-triangle"]};
     let html="";
     nSnap.forEach(d=>{ const n=d.data(); const [cls,ico]=(typeIcon[n.type]||["ni-order","ti-file-invoice"]);
@@ -1560,11 +1576,20 @@ function renderProducts(list){
 
   const filtered = list.filter(p => (p.brand || "Unbranded") === selected);
 
+  const today = new Date();
+  const threeMonthsOut = new Date(); threeMonthsOut.setMonth(threeMonthsOut.getMonth()+3);
+  const expiryBadge = (p) => {
+    if (!p.expiryDate) return "";
+    const exp = new Date(p.expiryDate);
+    if (exp < today) return `<span class="badge" style="background:#FCEBEB;color:#791F1F;margin-left:4px">Expired</span>`;
+    if (exp <= threeMonthsOut) return `<span class="badge" style="background:#FAEEDA;color:#854F0B;margin-left:4px">Expiring Soon</span>`;
+    return "";
+  };
   const productsHtml = filtered.length
     ? `<div class="card" style="margin-bottom:8px"><table class="tbl">
-        <colgroup><col style="width:46%"><col style="width:22%"><col style="width:20%"><col style="width:12%"></colgroup>
-        <thead><tr><th>Product</th><th>SKU</th><th>Unit</th><th>Cat</th></tr></thead>
-        <tbody>${filtered.map(p=>`<tr><td><b>${p.name}</b></td><td style="font-size:11px">${p.sku}</td><td style="font-size:11px">${p.unit}</td><td style="font-size:11px">${p.category||"—"}</td></tr>`).join("")}</tbody>
+        <colgroup><col style="width:40%"><col style="width:18%"><col style="width:16%"><col style="width:10%"><col style="width:16%"></colgroup>
+        <thead><tr><th>Product</th><th>SKU</th><th>Unit</th><th>Cat</th><th>Expiry</th></tr></thead>
+        <tbody>${filtered.map(p=>`<tr><td><b>${p.name}</b>${expiryBadge(p)}</td><td style="font-size:11px">${p.sku}</td><td style="font-size:11px">${p.unit}</td><td style="font-size:11px">${p.category||"—"}</td><td style="font-size:11px">${p.expiryDate||"—"}</td></tr>`).join("")}</tbody>
       </table></div>`
     : `<div class="empty-state" style="margin-bottom:8px">No products under ${selected} yet</div>`;
 
