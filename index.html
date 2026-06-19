@@ -1457,7 +1457,10 @@ async function populateSelects(){
   });
   ["inp-order-customer","inp-pay-customer"].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
-    el.innerHTML='<option value="">Select customer…</option>';
+    const isOrderField = id === "inp-order-customer";
+    el.innerHTML = isOrderField
+      ? '<option value="">Select customer…</option><option value="walkin">\ud83d\udc64 Walk-in / One-time Customer</option>'
+      : '<option value="">Select customer…</option>';
     customers.forEach(c=>{ const o=document.createElement("option"); o.value=c.id; o.textContent=c.name; el.appendChild(o); });
   });
 }
