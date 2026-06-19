@@ -523,12 +523,14 @@ window.loadCustomers = async () => {
 };
 
 window.saveCustomer = async () => {
-  const name  = document.getElementById("inp-cust-name").value.trim();
-  const phone = document.getElementById("inp-cust-phone").value.trim();
-  const lim   = parseFloat(document.getElementById("inp-cust-limit").value) || 0;
+  const name     = document.getElementById("inp-cust-name").value.trim();
+  const branchId = document.getElementById("inp-cust-branch").value;
+  const phone    = document.getElementById("inp-cust-phone").value.trim();
+  const lim      = parseFloat(document.getElementById("inp-cust-limit").value) || 0;
   if (!name) { alert("Enter customer name"); return; }
+  if (!branchId) { alert("Select a branch for this customer"); return; }
   setLoading(true);
-  await addDoc(collection(db, "customers"), { name, phone, creditLimit: lim, outstandingBalance: 0, isActive: true, createdAt: serverTimestamp() });
+  await addDoc(collection(db, "customers"), { name, branchId, phone, creditLimit: lim, outstandingBalance: 0, isActive: true, createdAt: serverTimestamp() });
   closeModal("modal-customer");
   loadCustomers();
   setLoading(false);
@@ -1183,6 +1185,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
 <div class="modal-bg" id="modal-customer"><div class="modal">
   <div class="modal-title">Add Customer <button onclick="closeModal('modal-customer')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
   <div class="form-field"><label>Customer Name</label><input id="inp-cust-name" type="text" placeholder="e.g. Kebede Trading"></div>
+  <div class="form-field"><label>Branch</label><select id="inp-cust-branch"><option value="">Select branch…</option></select></div>
   <div class="form-field"><label>Phone</label><input id="inp-cust-phone" type="tel" placeholder="+251..."></div>
   <div class="form-field"><label>Credit Limit (ETB)</label><input id="inp-cust-limit" type="number" placeholder="0"></div>
   <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveCustomer()"><i class="ti ti-check"></i> Save Customer</button>
@@ -1445,7 +1448,7 @@ async function populateSelects(){
   pSnap.forEach(d=>products.push({id:d.id,...d.data()}));
   cSnap.forEach(d=>customers.push({id:d.id,...d.data()}));
   window._branches=branches; window._products=products; window._customers=customers;
-  ["inp-order-branch","inp-exp-branch","inp-dmg-branch","inp-tr-from","inp-tr-to","inp-adj-branch","inp-pay-branch"].forEach(id=>{
+  ["inp-order-branch","inp-exp-branch","inp-dmg-branch","inp-tr-from","inp-tr-to","inp-adj-branch","inp-pay-branch","inp-cust-branch"].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
     el.innerHTML='<option value="">Select branch…</option>';
     branches.forEach(b=>{ const o=document.createElement("option"); o.value=b.id; o.textContent=b.name; el.appendChild(o); });
@@ -1598,7 +1601,7 @@ function renderOrders(list){
 }
 
 function renderCustomers(list){
-  const addBtn='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-primary btn-sm" onclick="openModal(\'modal-customer\')"><i class="ti ti-user-plus"></i> Add Customer</button></div>';
+  const addBtn='<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px"><button class="btn btn-sm" onclick="assignCustomersToBishoftu()" style="color:#1D9E75;border-color:#97C459"><i class="ti ti-wand"></i> Assign Unassigned to Bishoftu</button><button class="btn btn-primary btn-sm" onclick="openModal(\'modal-customer\')"><i class="ti ti-user-plus"></i> Add Customer</button></div>';
   if(!list.length){ document.getElementById("tab-customers").innerHTML=addBtn+'<div class="empty-state">No customers yet.</div>'; return; }
   document.getElementById("tab-customers").innerHTML=addBtn+'<div class="card">'+list.map(c=>{
     const pct=c.creditLimit>0?Math.min(100,Math.round((c.outstandingBalance/c.creditLimit)*100)):0;
@@ -1830,6 +1833,29 @@ window.renderStaffWithPresence = (list) => {
 // ══════════════════════════════════════════════════════════
 // FIX BRANDS — auto-assign brand based on product name prefix
 // ══════════════════════════════════════════════════════════
+window.assignCustomersToBishoftu = async () => {
+  const db = window.DB; const FS = window.FS;
+  setLoading(true);
+  const branchSnaps = await FS.getDocs(FS.collection(db, "branches"));
+  let bishoftuId = null;
+  branchSnaps.forEach(d => { if ((d.data().name||"").toLowerCase().includes("bishoftu")) bishoftuId = d.id; });
+  if (!bishoftuId) { alert("Bishoftu branch not found. Please check the branch name."); setLoading(false); return; }
+  const custSnaps = await FS.getDocs(FS.collection(db, "customers"));
+  const updates = [];
+  let count = 0;
+  custSnaps.forEach(d => {
+    const data = d.data();
+    if (!data.branchId) {
+      updates.push(FS.updateDoc(FS.doc(db, "customers", d.id), { branchId: bishoftuId }));
+      count++;
+    }
+  });
+  await Promise.all(updates);
+  loadCustomers();
+  setLoading(false);
+  alert("✓ " + count + " customer(s) assigned to Bishoftu branch!");
+};
+
 window.fixBrandsAutomatically = async () => {
   const db = window.DB; const FS = window.FS;
   setLoading(true);
@@ -2053,7 +2079,7 @@ window.loadBranchDetailStock = async (branchId) => {
 window.loadBranchDetailCredit = async (branchId) => {
   const db = window.DB; const FS = window.FS;
   const snaps = await FS.getDocs(FS.collection(db, "customers"));
-  const list = []; snaps.forEach(d => { const data = d.data(); if (data.outstandingBalance > 0) list.push({ id: d.id, ...data }); });
+  const list = []; snaps.forEach(d => { const data = d.data(); if (data.outstandingBalance > 0 && data.branchId === branchId) list.push({ id: d.id, ...data }); });
   const el = document.getElementById("bdt-credit");
   if (!list.length) { el.innerHTML = '<div class="empty-state">No outstanding credit</div>'; return; }
   const total = list.reduce((s, c) => s + (c.outstandingBalance || 0), 0);
