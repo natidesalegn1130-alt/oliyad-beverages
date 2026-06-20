@@ -114,12 +114,10 @@ window.saveProduct = async () => {
     else if (nu.startsWith("MIRINDA")) brand = "Mirinda";
     else brand = cat;
   }
-  const expiryDate = document.getElementById("inp-prod-expiry").value || null;
   if (!name || !sku || !unit) { alert("Fill in all fields"); return; }
   setLoading(true);
-  await addDoc(collection(db, "products"), { name, sku, unit, category: cat, brand, expiryDate, isActive: true, createdAt: serverTimestamp() });
+  await addDoc(collection(db, "products"), { name, sku, unit, category: cat, brand, isActive: true, createdAt: serverTimestamp() });
   closeModal("modal-product");
-  document.getElementById("inp-prod-expiry").value = "";
   window._selectedBrand = brand;
   loadProducts();
   setLoading(false);
@@ -146,7 +144,7 @@ window.initAdjustment = () => {
 
 window.addAdjProduct = () => {
   const idx = window._adjItems.length;
-  window._adjItems.push({ productId:"", qty:0, hasDamage:false, dmgQty:0, dmgReason:"transit_damage", dmgSpill:0, dmgMissing:0, dmgPkg:false, dmgNote:"" });
+  window._adjItems.push({ productId:"", qty:0, expiryDate:"", hasDamage:false, dmgQty:0, dmgReason:"transit_damage", dmgSpill:0, dmgMissing:0, dmgPkg:false, dmgNote:"" });
   renderAdjProducts();
 };
 
@@ -180,6 +178,10 @@ window.renderAdjProducts = () => {
             <label>Qty (cases)</label>
             <input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
           </div>
+        </div>
+        <div class="form-field">
+          <label>Expiry Date <span style="color:#999;font-weight:400">(optional, this batch)</span></label>
+          <input type="date" oninput="window._adjItems[${idx}].expiryDate=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
         </div>
         <!-- Damage toggle for this product -->
         <div style="border:0.5px solid #f0d0d0;border-radius:8px;overflow:hidden;margin-top:4px">
@@ -257,11 +259,22 @@ window.saveAdjustment = async () => {
     const stockId = branchId + "_" + item.productId;
     const ref = FS.doc(db, "stock", stockId);
     const snap = await FS.getDoc(ref);
+    const newExpiry = item.expiryDate || null;
+
     if (snap.exists()) {
-      if (type === "set") await FS.updateDoc(ref, { quantity: netQty, updatedAt: FS.serverTimestamp() });
-      else { const delta = type === "add" ? netQty : -netQty; await FS.updateDoc(ref, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp() }); }
+      const existingData = snap.data();
+      // Keep the EARLIEST expiry date between existing and new batch (Option A: simple, safe tracking)
+      let earliestExpiry = existingData.earliestExpiry || null;
+      if (newExpiry) {
+        if (!earliestExpiry || new Date(newExpiry) < new Date(earliestExpiry)) {
+          earliestExpiry = newExpiry;
+        }
+      }
+      const expiryUpdate = (type === "add" && newExpiry) ? { earliestExpiry } : {};
+      if (type === "set") await FS.updateDoc(ref, { quantity: netQty, updatedAt: FS.serverTimestamp(), ...expiryUpdate });
+      else { const delta = type === "add" ? netQty : -netQty; await FS.updateDoc(ref, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp(), ...expiryUpdate }); }
     } else {
-      await FS.setDoc(ref, { branchId, productId: item.productId, quantity: netQty, updatedAt: FS.serverTimestamp() });
+      await FS.setDoc(ref, { branchId, productId: item.productId, quantity: netQty, earliestExpiry: newExpiry, updatedAt: FS.serverTimestamp() });
     }
 
     // Save stock movement
@@ -1187,7 +1200,6 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
   </div>
   <div class="form-field"><label>Brand</label><input id="inp-prod-brand" type="text" placeholder="e.g. KK, Pepsi, Coca-Cola, Ambo"></div>
   <div class="form-field"><label>Category</label><select id="inp-prod-cat"><option>Juice</option><option>Water</option><option>Soda</option><option>Other</option></select></div>
-  <div class="form-field"><label>Expiry Date <span style="color:#999;font-weight:400">(optional)</span></label><input id="inp-prod-expiry" type="date"></div>
   <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveProduct()"><i class="ti ti-check"></i> Save Product</button>
 </div></div>
 
@@ -1494,10 +1506,10 @@ async function loadDashboard(){
     document.getElementById("dash-lowstock").textContent=lowStock;
     document.getElementById("dash-customers").textContent=cSnap.size;
     try {
-      const pSnap = await FS.getDocs(FS.collection(db,"products"));
+      const stSnap = await FS.getDocs(FS.collection(db,"stock"));
       const today2 = new Date(); const threeMo = new Date(); threeMo.setMonth(threeMo.getMonth()+3);
       let expiringCount = 0;
-      pSnap.forEach(d => { const ed = d.data().expiryDate; if (ed) { const exp = new Date(ed); if (exp >= today2 && exp <= threeMo) expiringCount++; } });
+      stSnap.forEach(d => { const ed = d.data().earliestExpiry; if (ed && d.data().quantity > 0) { const exp = new Date(ed); if (exp >= today2 && exp <= threeMo) expiringCount++; } });
       const expEl = document.getElementById("dash-expiring"); if (expEl) expEl.textContent = expiringCount;
     } catch(e) { console.error(e); }
     const typeIcon={order:["ni-order","ti-file-invoice"],payment:["ni-payment","ti-cash"],transfer:["ni-transfer","ti-transfer"],damage:["ni-damage","ti-alert-triangle"],expense:["ni-expense","ti-receipt"],stock:["ni-stock","ti-package"],low_stock:["ni-stock","ti-alert-triangle"]};
@@ -1576,20 +1588,11 @@ function renderProducts(list){
 
   const filtered = list.filter(p => (p.brand || "Unbranded") === selected);
 
-  const today = new Date();
-  const threeMonthsOut = new Date(); threeMonthsOut.setMonth(threeMonthsOut.getMonth()+3);
-  const expiryBadge = (p) => {
-    if (!p.expiryDate) return "";
-    const exp = new Date(p.expiryDate);
-    if (exp < today) return `<span class="badge" style="background:#FCEBEB;color:#791F1F;margin-left:4px">Expired</span>`;
-    if (exp <= threeMonthsOut) return `<span class="badge" style="background:#FAEEDA;color:#854F0B;margin-left:4px">Expiring Soon</span>`;
-    return "";
-  };
   const productsHtml = filtered.length
     ? `<div class="card" style="margin-bottom:8px"><table class="tbl">
-        <colgroup><col style="width:40%"><col style="width:18%"><col style="width:16%"><col style="width:10%"><col style="width:16%"></colgroup>
-        <thead><tr><th>Product</th><th>SKU</th><th>Unit</th><th>Cat</th><th>Expiry</th></tr></thead>
-        <tbody>${filtered.map(p=>`<tr><td><b>${p.name}</b>${expiryBadge(p)}</td><td style="font-size:11px">${p.sku}</td><td style="font-size:11px">${p.unit}</td><td style="font-size:11px">${p.category||"—"}</td><td style="font-size:11px">${p.expiryDate||"—"}</td></tr>`).join("")}</tbody>
+        <colgroup><col style="width:46%"><col style="width:22%"><col style="width:20%"><col style="width:12%"></colgroup>
+        <thead><tr><th>Product</th><th>SKU</th><th>Unit</th><th>Cat</th></tr></thead>
+        <tbody>${filtered.map(p=>`<tr><td><b>${p.name}</b></td><td style="font-size:11px">${p.sku}</td><td style="font-size:11px">${p.unit}</td><td style="font-size:11px">${p.category||"—"}</td></tr>`).join("")}</tbody>
       </table></div>`
     : `<div class="empty-state" style="margin-bottom:8px">No products under ${selected} yet</div>`;
 
@@ -1615,7 +1618,15 @@ function renderStock(list){
   const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
   const btn='<button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="openModal(\'modal-adjustment\')"><i class="ti ti-adjustments"></i> Stock Adjustment</button>';
   if(!list.length){ document.getElementById("tab-stock").innerHTML='<div class="empty-state">No stock records yet.</div>'+btn; return; }
-  document.getElementById("tab-stock").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:40%"><col style="width:35%"><col style="width:25%"></colgroup><thead><tr><th>Product</th><th>Branch</th><th>Qty</th></tr></thead><tbody>${list.map(s=>`<tr><td>${pMap[s.productId]||s.productId}</td><td>${bMap[s.branchId]||s.branchId}</td><td>${s.quantity<20?`<span style="color:#E24B4A;font-weight:700">${s.quantity}</span>`:s.quantity<50?`<span style="color:#EF9F27;font-weight:700">${s.quantity}</span>`:s.quantity}</td></tr>`).join("")}</tbody></table></div>`+btn;
+  const today3 = new Date(); const threeMo2 = new Date(); threeMo2.setMonth(threeMo2.getMonth()+3);
+  const expBadge2 = (s) => {
+    if (!s.earliestExpiry || s.quantity <= 0) return "";
+    const exp = new Date(s.earliestExpiry);
+    if (exp < today3) return `<span class="badge" style="background:#FCEBEB;color:#791F1F;font-size:10px;margin-left:4px">Expired ${s.earliestExpiry}</span>`;
+    if (exp <= threeMo2) return `<span class="badge" style="background:#FAEEDA;color:#854F0B;font-size:10px;margin-left:4px">Exp ${s.earliestExpiry}</span>`;
+    return `<span style="font-size:10px;color:#999;margin-left:4px">Exp ${s.earliestExpiry}</span>`;
+  };
+  document.getElementById("tab-stock").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:36%"><col style="width:30%"><col style="width:34%"></colgroup><thead><tr><th>Product</th><th>Branch</th><th>Qty</th></tr></thead><tbody>${list.map(s=>`<tr><td>${pMap[s.productId]||s.productId}</td><td>${bMap[s.branchId]||s.branchId}</td><td>${s.quantity<20?`<span style="color:#E24B4A;font-weight:700">${s.quantity}</span>`:s.quantity<50?`<span style="color:#EF9F27;font-weight:700">${s.quantity}</span>`:s.quantity}${expBadge2(s)}</td></tr>`).join("")}</tbody></table></div>`+btn;
 }
 
 function renderOrders(list){
