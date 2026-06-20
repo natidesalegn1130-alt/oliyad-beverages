@@ -156,10 +156,11 @@ window.removeAdjProduct = (idx) => {
 
 window.renderAdjProducts = () => {
   const db = window.DB;
-  const pOpts = (window._products||[]).map(p=>`<option value="${p.id}">${p.name}</option>`).join("");
   const container = document.getElementById("adj-products-container");
   if (!container) return;
-  container.innerHTML = window._adjItems.map((item, idx) => `
+  container.innerHTML = window._adjItems.map((item, idx) => {
+    const pOptsForItem = (window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("");
+    return `
     <div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
       <div style="background:#f9f9f9;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #e5e5e0">
         <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
@@ -170,57 +171,58 @@ window.renderAdjProducts = () => {
           <div class="form-field" style="flex:2">
             <label>Product</label>
             <select onchange="window._adjItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-              <option value="">Select product…</option>
-              ${pOpts}
+              <option value="" ${!item.productId?"selected":""}>Select product…</option>
+              ${pOptsForItem}
             </select>
           </div>
           <div class="form-field" style="flex:1">
             <label>Qty (cases)</label>
-            <input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._adjItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
           </div>
         </div>
         <div class="form-field">
           <label>Expiry Date <span style="color:#999;font-weight:400">(optional, this batch)</span></label>
-          <input type="date" oninput="window._adjItems[${idx}].expiryDate=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+          <input type="date" value="${item.expiryDate||""}" oninput="window._adjItems[${idx}].expiryDate=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
         </div>
         <!-- Damage toggle for this product -->
         <div style="border:0.5px solid #f0d0d0;border-radius:8px;overflow:hidden;margin-top:4px">
           <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;background:#fff8f8" onclick="toggleAdjDamage(${idx})">
-            <input type="checkbox" id="adj-dmg-chk-${idx}" style="width:16px;height:16px;cursor:pointer" onclick="event.stopPropagation();toggleAdjDamage(${idx})">
+            <input type="checkbox" id="adj-dmg-chk-${idx}" ${item.hasDamage?"checked":""} style="width:16px;height:16px;cursor:pointer" onclick="event.stopPropagation();toggleAdjDamage(${idx})">
             <div style="font-size:12px;font-weight:500;color:#E24B4A"><i class="ti ti-alert-triangle" style="font-size:13px;margin-right:4px"></i>Damaged / Lost goods included</div>
           </div>
-          <div id="adj-dmg-sec-${idx}" style="display:none;padding:10px 12px;border-top:0.5px solid #f0d0d0;background:#fffafa">
+          <div id="adj-dmg-sec-${idx}" style="display:${item.hasDamage?"block":"none"};padding:10px 12px;border-top:0.5px solid #f0d0d0;background:#fffafa">
             <div style="font-size:11px;font-weight:600;color:#E24B4A;margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Damage / Loss Report</div>
             <div class="form-row">
               <div class="form-field">
                 <label>Damaged cases</label>
-                <input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].dmgQty=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+                <input type="number" placeholder="0" min="0" value="${item.dmgQty||""}" oninput="window._adjItems[${idx}].dmgQty=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
               </div>
               <div class="form-field">
                 <label>Reason</label>
                 <select onchange="window._adjItems[${idx}].dmgReason=this.value" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:12px">
-                  <option value="spilling">Spilling (leaking)</option>
-                  <option value="missing_items">Missing items</option>
-                  <option value="packaging_damaged">Packaging damaged</option>
-                  <option value="spilling_and_missing">Spilling + Missing</option>
-                  <option value="transit_damage" selected>Transit damage</option>
-                  <option value="other">Other</option>
+                  <option value="spilling" ${item.dmgReason==="spilling"?"selected":""}>Spilling (leaking)</option>
+                  <option value="missing_items" ${item.dmgReason==="missing_items"?"selected":""}>Missing items</option>
+                  <option value="packaging_damaged" ${item.dmgReason==="packaging_damaged"?"selected":""}>Packaging damaged</option>
+                  <option value="spilling_and_missing" ${item.dmgReason==="spilling_and_missing"?"selected":""}>Spilling + Missing</option>
+                  <option value="transit_damage" ${(!item.dmgReason||item.dmgReason==="transit_damage")?"selected":""}>Transit damage</option>
+                  <option value="other" ${item.dmgReason==="other"?"selected":""}>Other</option>
                 </select>
               </div>
             </div>
             <div class="form-row">
-              <div class="form-field"><label>Spilling items/case</label><input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].dmgSpill=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
-              <div class="form-field"><label>Missing items/case</label><input type="number" placeholder="0" min="0" oninput="window._adjItems[${idx}].dmgMissing=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
+              <div class="form-field"><label>Spilling items/case</label><input type="number" placeholder="0" min="0" value="${item.dmgSpill||""}" oninput="window._adjItems[${idx}].dmgSpill=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
+              <div class="form-field"><label>Missing items/case</label><input type="number" placeholder="0" min="0" value="${item.dmgMissing||""}" oninput="window._adjItems[${idx}].dmgMissing=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:#f9f9f9;border-radius:6px;margin-bottom:6px">
-              <input type="checkbox" id="adj-dmg-pkg-${idx}" onchange="window._adjItems[${idx}].dmgPkg=this.checked" style="width:14px;height:14px">
+              <input type="checkbox" id="adj-dmg-pkg-${idx}" ${item.dmgPkg?"checked":""} onchange="window._adjItems[${idx}].dmgPkg=this.checked" style="width:14px;height:14px">
               <label for="adj-dmg-pkg-${idx}" style="font-size:12px;cursor:pointer">Plastic / Cardboard packaging damaged</label>
             </div>
-            <div class="form-field"><label>Damage Notes</label><textarea rows="2" placeholder="Describe damage…" oninput="window._adjItems[${idx}].dmgNote=this.value" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:12px;resize:none"></textarea></div>
+            <div class="form-field"><label>Damage Notes</label><textarea rows="2" placeholder="Describe damage…" oninput="window._adjItems[${idx}].dmgNote=this.value">${item.dmgNote||""}</textarea></div>
           </div>
         </div>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 };
 
 window.toggleAdjDamage = (idx) => {
@@ -345,6 +347,7 @@ window._orderItems = [];
 
 window.initOrderForm = async () => {
   window._orderItems = [];
+  window._orderBranchStock = {};
   renderOrderItems();
   document.getElementById("order-grand-total").textContent = "ETB 0.00";
   const wf=document.getElementById("walkin-name-field"); if(wf) wf.style.display="none";
@@ -354,9 +357,21 @@ window.initOrderForm = async () => {
 window.addOrderItem = async () => {
   const productId  = document.getElementById("inp-order-product").value;
   const branchId   = document.getElementById("inp-order-branch").value;
-  const qty        = parseInt(document.getElementById("inp-order-qty").value) || 1;
+  let qty          = parseInt(document.getElementById("inp-order-qty").value) || 1;
   const priceType  = document.getElementById("inp-order-price-type").value;
   if (!productId || !branchId) { alert("Select branch and product first"); return; }
+
+  // Cap qty to available stock at this branch
+  const availableQty = window._orderBranchStock?.[productId] ?? 0;
+  // account for qty already added in this order for the same product
+  const alreadyInOrder = window._orderItems.filter(i=>i.productId===productId).reduce((s,i)=>s+i.qty,0);
+  const remainingAvailable = Math.max(0, availableQty - alreadyInOrder);
+  if (remainingAvailable <= 0) { alert("This product is out of stock at the selected branch."); return; }
+  if (qty > remainingAvailable) {
+    alert("Only " + remainingAvailable + " case(s) available for this product at this branch. Adding " + remainingAvailable + " instead.");
+    qty = remainingAvailable;
+  }
+
   const prices = await getProductPrices(productId, branchId);
   const price = priceType === "wholesale" ? prices.wholesale : prices.retail;
   if (!price) { alert("No " + priceType + " price set for this product. Ask the CEO to set prices first."); return; }
@@ -399,6 +414,35 @@ window.renderOrderItems = () => {
 window.updateOrderTotal = () => {
   const total = window._orderItems.reduce((sum, i) => sum + i.subtotal, 0);
   document.getElementById("order-grand-total").textContent = "ETB " + total.toLocaleString();
+};
+
+window._orderBranchStock = {}; // productId -> available qty for selected branch
+
+window.onOrderBranchChange = async () => {
+  const branchId = document.getElementById("inp-order-branch").value;
+  const productSelect = document.getElementById("inp-order-product");
+  productSelect.innerHTML = '<option value="">Select product…</option>';
+  window._orderBranchStock = {};
+  if (!branchId) { onBranchOrProductChange(); return; }
+  const db = window.DB; const FS = window.FS;
+  const stockSnaps = await FS.getDocs(FS.query(FS.collection(db, "stock"), FS.where("branchId","==",branchId)));
+  const stockMap = {};
+  stockSnaps.forEach(d => { const data = d.data(); stockMap[data.productId] = data.quantity || 0; });
+  window._orderBranchStock = stockMap;
+  (window._products||[]).forEach(p => {
+    const qty = stockMap[p.id] || 0;
+    const o = document.createElement("option");
+    o.value = p.id;
+    if (qty > 0) {
+      o.textContent = p.name + " (" + qty + " in stock)";
+    } else {
+      o.textContent = p.name + " — Out of stock";
+      o.disabled = true;
+      o.style.color = "#999";
+    }
+    productSelect.appendChild(o);
+  });
+  onBranchOrProductChange();
 };
 
 window.onBranchOrProductChange = async () => {
@@ -476,7 +520,11 @@ window.saveOrder = async () => {
     const custName = isWalkin ? (walkinName || "Walk-in Customer") : ((window._customers||[]).find(c=>c.id===customerId)?.name || "Customer");
     const branchName = (window._branches||[]).find(b=>b.id===branchId)?.name || "Branch";
     const itemsList = window._orderItems.map(i=>i.qty+"x "+i.productName).join(", ");
-    const payLabel = {cash:"Cash",bank:"Bank",credit:"Full Credit",partial:"Partial Payment"}[payment]||payment;
+    const staffName2 = window.CURRENT_USER?.fullName || "Staff";
+    let payLabel = {cash:"Cash",bank:"Bank",credit:"Full Credit",partial:"Partial Payment"}[payment]||payment;
+    if (payment === "partial") {
+      payLabel = "Partial Payment · ETB " + partialAmount.toLocaleString() + " paid now to " + staffName2 + " · ETB " + creditGiven.toLocaleString() + " on credit";
+    }
     await FS.addDoc(FS.collection(db, "notifications"), {
       type: "order",
       title: "New order from " + custName,
@@ -1046,7 +1094,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
     </div>
 
     <div class="page" id="page-stock">
-      <div class="sec-header"><div class="sec-title">Products & Stock</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="fixBrandsAutomatically()" style="color:#1D9E75;border-color:#97C459"><i class="ti ti-wand"></i> Fix Brands</button><button class="btn btn-sm" onclick="openModal('modal-set-price');loadPricesList()"><i class="ti ti-tag"></i> Set Prices</button></div></div>
+      <div class="sec-header"><div class="sec-title">Products & Stock</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="openModal('modal-set-price');loadPricesList()"><i class="ti ti-tag"></i> Set Prices</button></div></div>
       <div class="tab-bar">
         <button class="tab-btn active" onclick="switchTab(this,'tab-products')">Products</button>
         <button class="tab-btn" onclick="switchTab(this,'tab-stock')">Stock</button>
@@ -1237,7 +1285,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
     <div class="form-field"><label>Amount Paid Now (ETB)</label><input id="inp-order-partial-amount" type="number" placeholder="0" style="border-color:#EF9F27"></div>
     <div style="font-size:11px;color:#EF9F27;margin-bottom:8px">Remaining amount will be recorded as credit</div>
   </div>
-  <div class="form-field"><label>Branch</label><select id="inp-order-branch" onchange="onBranchOrProductChange()"><option value="">Select branch…</option></select></div>
+  <div class="form-field"><label>Branch</label><select id="inp-order-branch" onchange="onOrderBranchChange()"><option value="">Select branch…</option></select></div>
 
   <div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-bottom:10px">
     <div style="font-size:12px;font-weight:500;color:#666;margin-bottom:8px">ADD PRODUCTS</div>
@@ -1471,13 +1519,17 @@ async function populateSelects(){
   window._branches=branches; window._products=products; window._customers=customers;
   ["inp-order-branch","inp-exp-branch","inp-dmg-branch","inp-tr-from","inp-tr-to","inp-adj-branch","inp-pay-branch","inp-cust-branch"].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
+    const prevVal = el.value;
     el.innerHTML='<option value="">Select branch…</option>';
     branches.forEach(b=>{ const o=document.createElement("option"); o.value=b.id; o.textContent=b.name; el.appendChild(o); });
+    if (prevVal && [...el.options].some(o=>o.value===prevVal)) el.value = prevVal;
   });
   ["inp-order-product","inp-dmg-product","inp-tr-product","inp-adj-product"].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
+    const prevVal = el.value;
     el.innerHTML='<option value="">Select product…</option>';
     products.forEach(p=>{ const o=document.createElement("option"); o.value=p.id; o.textContent=p.name; el.appendChild(o); });
+    if (prevVal && [...el.options].some(o=>o.value===prevVal)) el.value = prevVal;
   });
   ["inp-order-customer","inp-pay-customer"].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
@@ -1637,7 +1689,7 @@ function renderOrders(list){
 }
 
 function renderCustomers(list){
-  const addBtn='<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px"><button class="btn btn-sm" onclick="assignCustomersToBishoftu()" style="color:#1D9E75;border-color:#97C459"><i class="ti ti-wand"></i> Assign Unassigned to Bishoftu</button><button class="btn btn-primary btn-sm" onclick="openModal(\'modal-customer\')"><i class="ti ti-user-plus"></i> Add Customer</button></div>';
+  const addBtn='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-primary btn-sm" onclick="openModal(\'modal-customer\')"><i class="ti ti-user-plus"></i> Add Customer</button></div>';
   if(!list.length){ document.getElementById("tab-customers").innerHTML=addBtn+'<div class="empty-state">No customers yet.</div>'; return; }
   document.getElementById("tab-customers").innerHTML=addBtn+'<div class="card">'+list.map(c=>{
     const pct=c.creditLimit>0?Math.min(100,Math.round((c.outstandingBalance/c.creditLimit)*100)):0;
@@ -2211,13 +2263,15 @@ window.loadCustDetailPayments = async (customerId) => {
   sSnaps.forEach(d => sMap[d.id] = d.data().fullName);
   const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
   list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
+  const payMethodLabels = {cash:"Cash",bank_transfer:"Bank Transfer",mobile_money:"Mobile Money",credit_settlement:"Credit Settlement"};
   document.getElementById("cdt-payments").innerHTML = list.length ? list.map(p => `
     <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
       <div style="display:flex;justify-content:space-between;margin-bottom:2px">
         <span style="font-weight:600;font-size:13px;color:#1D9E75">ETB ${p.amount.toLocaleString()}</span>
-        <span class="badge bb">${p.method}</span>
+        <span class="badge bb">${payMethodLabels[p.method]||p.method}</span>
       </div>
       ${p.method==="bank_transfer" ? `<div style="font-size:11px;color:#666">Bank transfer to: <strong>${p.transferTo||"—"}</strong></div>` : ""}
+      ${p.note ? `<div style="font-size:11px;color:#666">${p.note}</div>` : ""}
       <div style="font-size:11px;color:#666">Handled by: <strong>${sMap[p.receivedBy]||"—"}</strong></div>
       <div style="font-size:11px;color:#999;margin-top:2px"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtTs(p.createdAt)}</div>
     </div>`).join("") : '<div class="empty-state">No payments yet</div>';
@@ -2301,6 +2355,28 @@ window.saveCreditAction = async () => {
     doneBy: u.uid, branchId: u.branchId || null,
     createdAt: FS.serverTimestamp()
   });
+
+  // Arresting credit = customer handed over real money -> also log as a payment
+  if (action === "arrest") {
+    await FS.addDoc(FS.collection(db, "payments"), {
+      orderId: null, customerId,
+      branchId: customer.branchId || u.branchId || null,
+      amount, method: "credit_settlement",
+      transferTo: null,
+      receivedBy: u.uid,
+      note: note || "Credit settlement",
+      createdAt: FS.serverTimestamp()
+    });
+    const staffNameCr = u.fullName || "Staff";
+    await FS.addDoc(FS.collection(db, "notifications"), {
+      type: "payment",
+      title: "Credit settled by " + (customer.name || "Customer"),
+      description: "ETB " + amount.toLocaleString() + " · Credit Settlement · By " + staffNameCr + (note ? " · " + note : ""),
+      branchId: customer.branchId || u.branchId || null,
+      isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
+    });
+  }
+
   closeModal("modal-credit-mgmt");
   loadCustomers();
   setLoading(false);
