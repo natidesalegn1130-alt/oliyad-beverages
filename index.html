@@ -1041,25 +1041,25 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
       <div class="page-title" style="font-size:18px;font-weight:700;margin-bottom:14px">Welcome back, <span id="dash-welcome">there</span>!</div>
 
       <div class="dash-grid">
-        <div class="dash-card" onclick="navTo('orders')">
+        <div class="dash-card" onclick="navToTab('orders','tab-orders-list')">
           <div class="dash-card-icon"><i class="ti ti-receipt"></i></div>
           <div class="dash-card-label">Sales</div>
           <div class="dash-card-value" id="dash-orders">—</div>
           <div class="dash-card-sub">Orders today</div>
         </div>
-        <div class="dash-card" onclick="navTo('stock')">
+        <div class="dash-card" onclick="navToTab('stock','tab-stock')">
           <div class="dash-card-icon"><i class="ti ti-box"></i></div>
           <div class="dash-card-label">Inventory</div>
           <div class="dash-card-value" id="dash-lowstock" style="color:#E24B4A">—</div>
           <div class="dash-card-sub">Low stock items</div>
         </div>
-        <div class="dash-card" onclick="navTo('orders')">
+        <div class="dash-card" onclick="navToTab('orders','tab-orders-list')">
           <div class="dash-card-icon"><i class="ti ti-alert-circle"></i></div>
           <div class="dash-card-label">Unpaid Orders</div>
           <div class="dash-card-value" id="dash-unpaid" style="color:#E24B4A">—</div>
           <div class="dash-card-sub">Awaiting payment</div>
         </div>
-        <div class="dash-card" onclick="navTo('orders')">
+        <div class="dash-card" onclick="navToTab('orders','tab-customers')">
           <div class="dash-card-icon"><i class="ti ti-users"></i></div>
           <div class="dash-card-label">Customers</div>
           <div class="dash-card-value" id="dash-customers">—</div>
@@ -1077,7 +1077,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
           <div class="dash-card-value" id="dash-online-count" style="font-size:22px">—</div>
           <div class="dash-card-sub">Staff online</div>
         </div>
-        <div class="dash-card" onclick="navTo('stock')">
+        <div class="dash-card" onclick="navToTab('stock','tab-products')">
           <div class="dash-card-icon" style="background:#FAEEDA;color:#854F0B"><i class="ti ti-calendar-exclamation"></i></div>
           <div class="dash-card-label">Expiring Soon</div>
           <div class="dash-card-value" id="dash-expiring" style="color:#854F0B">—</div>
@@ -1096,9 +1096,9 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
     <div class="page" id="page-stock">
       <div class="sec-header"><div class="sec-title">Products & Stock</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="openModal('modal-set-price');loadPricesList()"><i class="ti ti-tag"></i> Set Prices</button></div></div>
       <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab(this,'tab-products')">Products</button>
-        <button class="tab-btn" onclick="switchTab(this,'tab-stock')">Stock</button>
-        <button class="tab-btn" onclick="switchTab(this,'tab-movement')">Movement</button>
+        <button class="tab-btn active" data-tab="tab-products" onclick="switchTab(this,'tab-products')">Products</button>
+        <button class="tab-btn" data-tab="tab-stock" onclick="switchTab(this,'tab-stock')">Stock</button>
+        <button class="tab-btn" data-tab="tab-movement" onclick="switchTab(this,'tab-movement')">Movement</button>
       </div>
       <div id="tab-products"><div class="empty-state">Loading…</div></div>
       <div id="tab-stock" style="display:none"><div class="empty-state">Loading…</div></div>
@@ -1108,9 +1108,9 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
     <div class="page" id="page-orders">
       <div class="sec-header"><div class="sec-title">Orders</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="openCreditMgmt()"><i class="ti ti-credit-card"></i> Credit</button><button class="btn btn-primary btn-sm" onclick="openModal('modal-order')"><i class="ti ti-plus"></i> New Order</button></div></div>
       <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab(this,'tab-orders-list')">Orders</button>
-        <button class="tab-btn" onclick="switchTab(this,'tab-customers')">Customers</button>
-        <button class="tab-btn" onclick="switchTab(this,'tab-payments')">Payments</button>
+        <button class="tab-btn active" data-tab="tab-orders-list" onclick="switchTab(this,'tab-orders-list')">Orders</button>
+        <button class="tab-btn" data-tab="tab-customers" onclick="switchTab(this,'tab-customers')">Customers</button>
+        <button class="tab-btn" data-tab="tab-payments" onclick="switchTab(this,'tab-payments')">Payments</button>
       </div>
       <div id="tab-orders-list"><div class="empty-state">Loading…</div></div>
       <div id="tab-customers" style="display:none"><div class="empty-state">Loading…</div></div>
@@ -1487,6 +1487,14 @@ function switchTab(btn,tabId){
   if(tabId==="tab-customers") loadCustomers();
   if(tabId==="tab-payments") loadPayments();
   if(tabId==="tab-movement") loadMovements();
+}
+function navToTab(pageId, tabId){
+  navTo(pageId);
+  // Find the tab button matching this tabId and click it programmatically (re-uses switchTab logic)
+  setTimeout(() => {
+    const btn = document.querySelector(`#page-${pageId} .tab-bar .tab-btn[data-tab="${tabId}"]`);
+    if (btn) switchTab(btn, tabId);
+  }, 0);
 }
 function openModal(id){
   document.getElementById(id).classList.add("open");
