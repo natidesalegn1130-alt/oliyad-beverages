@@ -1488,6 +1488,161 @@ function switchTab(btn,tabId){
   if(tabId==="tab-payments") loadPayments();
   if(tabId==="tab-movement") loadMovements();
 }
+// ══════════════ VOID / CORRECTION SYSTEM ══════════════
+// Only CEO and Manager roles can void records.
+window.canVoid = () => {
+  const u = window.CURRENT_USER;
+  return u && (u.role === "ceo" || u.role === "manager");
+};
+
+window._voidTarget = null; // { type, id, data }
+
+window.openVoidModal = (type, id, summaryText) => {
+  if (!canVoid()) { alert("Only CEO or Manager can void records."); return; }
+  window._voidTarget = { type, id };
+  document.getElementById("void-record-summary").innerHTML = summaryText;
+  document.getElementById("inp-void-reason").value = "";
+  openModal("modal-void");
+};
+
+window.confirmVoid = async () => {
+  const target = window._voidTarget;
+  const reason = document.getElementById("inp-void-reason").value.trim();
+  if (!target) return;
+  if (!reason) { alert("Please enter a reason for voiding this record."); return; }
+  setLoading(true);
+  const db = window.DB; const FS = window.FS;
+  const u = window.CURRENT_USER;
+  const voidMeta = { isVoided: true, voidedBy: u.uid, voidedByName: u.fullName || "Staff", voidReason: reason, voidedAt: FS.serverTimestamp() };
+
+  try {
+    if (target.type === "order") await voidOrder(target.id, voidMeta);
+    else if (target.type === "expense") await voidExpense(target.id, voidMeta);
+    else if (target.type === "damage") await voidDamage(target.id, voidMeta);
+    else if (target.type === "transfer") await voidTransfer(target.id, voidMeta);
+    else if (target.type === "adjustment") await voidStockMovement(target.id, voidMeta);
+    else if (target.type === "credit") await voidCreditAction(target.id, voidMeta);
+
+    await FS.addDoc(FS.collection(db, "notifications"), {
+      type: "void",
+      title: "Record voided — " + target.type,
+      description: "Reason: " + reason + " · By " + (u.fullName||"Staff"),
+      branchId: null, isRead: false, targetRole: "ceo", createdAt: FS.serverTimestamp()
+    });
+  } catch(e) {
+    alert("Error voiding record: " + e.message);
+    setLoading(false);
+    return;
+  }
+
+  closeModal("modal-void");
+  window._voidTarget = null;
+  setLoading(false);
+  alert("✓ Record voided and reversed successfully.");
+};
+
+// --- ORDER VOID: reverse stock deduction, credit given, and mark voided ---
+window.voidOrder = async (orderId, voidMeta) => {
+  const db = window.DB; const FS = window.FS;
+  const oRef = FS.doc(db, "orders", orderId);
+  const oSnap = await FS.getDoc(oRef);
+  if (!oSnap.exists()) return;
+  const o = oSnap.data();
+  if (o.isVoided) { alert("Already voided."); return; }
+
+  // Reverse stock: add back what was deducted
+  const itemsSnap = await FS.getDocs(FS.query(FS.collection(db, "orderItems"), FS.where("orderId","==",orderId)));
+  for (const d of itemsSnap.docs) {
+    const item = d.data();
+    const stockRef = FS.doc(db, "stock", o.branchId + "_" + item.productId);
+    const stockSnap = await FS.getDoc(stockRef);
+    if (stockSnap.exists()) await FS.updateDoc(stockRef, { quantity: FS.increment(item.quantity), updatedAt: FS.serverTimestamp() });
+  }
+
+  // Reverse credit given to customer
+  if (o.creditGiven > 0 && !o.isWalkin && o.customerId) {
+    await FS.updateDoc(FS.doc(db, "customers", o.customerId), { outstandingBalance: FS.increment(-o.creditGiven) });
+    await FS.addDoc(FS.collection(db, "creditLog"), { customerId: o.customerId, action: "voided", amount: o.creditGiven, note: "Order voided: " + voidMeta.voidReason, doneBy: voidMeta.voidedBy, branchId: o.branchId, createdAt: FS.serverTimestamp() });
+  }
+
+  await FS.updateDoc(oRef, voidMeta);
+};
+
+// --- EXPENSE VOID: just mark voided (no stock/credit effect to reverse) ---
+window.voidExpense = async (expenseId, voidMeta) => {
+  const db = window.DB; const FS = window.FS;
+  await FS.updateDoc(FS.doc(db, "expenses", expenseId), voidMeta);
+};
+
+// --- DAMAGE VOID: add the damaged quantity back to stock, mark voided ---
+window.voidDamage = async (damageId, voidMeta) => {
+  const db = window.DB; const FS = window.FS;
+  const dRef = FS.doc(db, "damagedStock", damageId);
+  const dSnap = await FS.getDoc(dRef);
+  if (!dSnap.exists()) return;
+  const dmg = dSnap.data();
+  if (dmg.isVoided) { alert("Already voided."); return; }
+  const stockRef = FS.doc(db, "stock", dmg.branchId + "_" + dmg.productId);
+  const stockSnap = await FS.getDoc(stockRef);
+  if (stockSnap.exists()) await FS.updateDoc(stockRef, { quantity: FS.increment(dmg.quantity), updatedAt: FS.serverTimestamp() });
+  await FS.updateDoc(dRef, voidMeta);
+};
+
+// --- TRANSFER VOID: reverse stock movement both directions, mark voided ---
+window.voidTransfer = async (transferId, voidMeta) => {
+  const db = window.DB; const FS = window.FS;
+  const tRef = FS.doc(db, "transfers", transferId);
+  const tSnap = await FS.getDoc(tRef);
+  if (!tSnap.exists()) return;
+  const t = tSnap.data();
+  if (t.isVoided) { alert("Already voided."); return; }
+  // Reverse: add back to source branch, remove from destination branch
+  const fromRef = FS.doc(db, "stock", t.fromBranchId + "_" + t.productId);
+  const fromSnap = await FS.getDoc(fromRef);
+  if (fromSnap.exists()) await FS.updateDoc(fromRef, { quantity: FS.increment(t.quantity), updatedAt: FS.serverTimestamp() });
+  const toRef = FS.doc(db, "stock", t.toBranchId + "_" + t.productId);
+  const toSnap = await FS.getDoc(toRef);
+  if (toSnap.exists()) await FS.updateDoc(toRef, { quantity: FS.increment(-t.quantity), updatedAt: FS.serverTimestamp() });
+  await FS.updateDoc(tRef, voidMeta);
+};
+
+// --- STOCK ADJUSTMENT VOID: reverse the net quantity change, mark voided ---
+window.voidStockMovement = async (movementId, voidMeta) => {
+  const db = window.DB; const FS = window.FS;
+  const mRef = FS.doc(db, "stockMovements", movementId);
+  const mSnap = await FS.getDoc(mRef);
+  if (!mSnap.exists()) return;
+  const m = mSnap.data();
+  if (m.isVoided) { alert("Already voided."); return; }
+  const netQty = m.netQuantity || m.quantity || 0;
+  const stockRef = FS.doc(db, "stock", m.branchId + "_" + m.productId);
+  const stockSnap = await FS.getDoc(stockRef);
+  if (stockSnap.exists()) {
+    // Reverse direction: receipt/add -> subtract back; remove/adjustment -> add back
+    const delta = (m.type === "receipt") ? -netQty : netQty;
+    await FS.updateDoc(stockRef, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp() });
+  }
+  await FS.updateDoc(mRef, voidMeta);
+};
+
+// --- CREDIT ACTION VOID: reverse the credit log entry's effect on customer balance ---
+window.voidCreditAction = async (creditLogId, voidMeta) => {
+  const db = window.DB; const FS = window.FS;
+  const cRef = FS.doc(db, "creditLog", creditLogId);
+  const cSnap = await FS.getDoc(cRef);
+  if (!cSnap.exists()) return;
+  const entry = cSnap.data();
+  if (entry.isVoided) { alert("Already voided."); return; }
+  let delta = 0;
+  if (entry.action === "given") delta = -entry.amount;       // reverse: remove the credit that was given
+  else if (entry.action === "arrested") delta = entry.amount; // reverse: re-add what was deducted
+  else if (entry.action === "adjusted") delta = 0;             // exact-set adjustments are not auto-reversible
+  if (delta !== 0) {
+    await FS.updateDoc(FS.doc(db, "customers", entry.customerId), { outstandingBalance: FS.increment(delta) });
+  }
+  await FS.updateDoc(cRef, voidMeta);
+};
+
 function navToTab(pageId, tabId){
   navTo(pageId);
   // Find the tab button matching this tabId and click it programmatically (re-uses switchTab logic)
@@ -1693,7 +1848,7 @@ function renderOrders(list){
   const cMap={}; (window._customers||[]).forEach(c=>cMap[c.id]=c.name);
   const sb={paid:"bg",unpaid:"ba",partial:"bb",credit:"br"};
   if(!list.length){ document.getElementById("tab-orders-list").innerHTML='<div class="empty-state">No orders yet.</div>'; return; }
-  document.getElementById("tab-orders-list").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:36%"><col style="width:30%"><col style="width:20%"><col style="width:14%"></colgroup><thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th></tr></thead><tbody>${list.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); return `<tr><td><b>${cMap[o.customerId]||"—"}</b></td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span></td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td></tr>`; }).join("")}</tbody></table></div>`;
+  document.getElementById("tab-orders-list").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:32%"><col style="width:24%"><col style="width:18%"><col style="width:14%"><col style="width:12%"></colgroup><thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${list.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); const isVoid=o.isVoided; const custName=cMap[o.customerId]||"—"; const summary="<b>"+custName+"</b><br>ETB "+(o.totalAmount||0).toLocaleString()+" · "+(o.paymentStatus||"")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td><b>${custName}</b></td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${isVoid?"voided":o.paymentStatus}</span></td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('order','${o.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this order"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 
 function renderCustomers(list){
@@ -1729,7 +1884,7 @@ function renderExpenses(list){
   const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
   const cb={fuel:"ba",salary:"bb",rent:"bgr",utilities:"bgr",other:"bgr"};
   if(!list.length){ document.getElementById("expenses-list").innerHTML='<div class="empty-state">No expenses yet.</div>'; return; }
-  document.getElementById("expenses-list").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:24%"><col style="width:26%"><col style="width:32%"></colgroup><thead><tr><th>Date</th><th>Category</th><th>Branch</th><th>Amount</th></tr></thead><tbody>${list.map(e=>{ const d=e.createdAt&&e.createdAt.toDate?e.createdAt.toDate():new Date(); return `<tr><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${cb[e.category]||"bgr"}">${e.category}</span></td><td>${bMap[e.branchId]||"—"}</td><td>ETB ${e.amount.toLocaleString()}</td></tr>`; }).join("")}</tbody></table></div>`;
+  document.getElementById("expenses-list").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:16%"><col style="width:20%"><col style="width:22%"><col style="width:28%"><col style="width:14%"></colgroup><thead><tr><th>Date</th><th>Category</th><th>Branch</th><th>Amount</th><th></th></tr></thead><tbody>${list.map(e=>{ const d=e.createdAt&&e.createdAt.toDate?e.createdAt.toDate():new Date(); const isVoid=e.isVoided; const summary="<b>"+(e.category||"")+"</b><br>ETB "+e.amount.toLocaleString()+" · "+(bMap[e.branchId]||"—")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${cb[e.category]||"bgr"}">${isVoid?"voided":e.category}</span></td><td>${bMap[e.branchId]||"—"}</td><td>ETB ${e.amount.toLocaleString()}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('expense','${e.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this expense"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 
 async function loadDamage(){
@@ -1739,7 +1894,7 @@ async function loadDamage(){
   const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
   const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
   const rb={damaged:"br",expired:"ba",lost:"bgr",theft:"br"};
-  document.getElementById("damage-list").innerHTML=list.length?list.map(d=>`<div class="dmg-item"><div class="dmg-icon"><i class="ti ti-alert-triangle"></i></div><div style="flex:1"><div style="font-weight:500;font-size:13px">${pMap[d.productId]||"—"} x${d.quantity}</div><div style="font-size:12px;color:#666">${bMap[d.branchId]||"—"} · ${d.note||""}</div></div><div><span class="badge ${rb[d.reason]||"bgr"}">${d.reason}</span></div></div>`).join(""):'<div class="empty-state">No damage reports yet.</div>';
+  document.getElementById("damage-list").innerHTML=list.length?list.map(d=>{ const isVoid=d.isVoided; const summary="<b>"+(pMap[d.productId]||"—")+"</b> x"+d.quantity+"<br>"+(bMap[d.branchId]||"—")+" · "+(d.reason||""); const summaryEsc=summary.replace(/"/g,"&quot;"); return `<div class="dmg-item" style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><div class="dmg-icon"><i class="ti ti-alert-triangle"></i></div><div style="flex:1"><div style="font-weight:500;font-size:13px">${pMap[d.productId]||"—"} x${d.quantity}</div><div style="font-size:12px;color:#666">${bMap[d.branchId]||"—"} · ${d.note||""}</div></div><div style="display:flex;align-items:center;gap:6px"><span class="badge ${rb[d.reason]||"bgr"}">${isVoid?"voided":d.reason}</span>${(!isVoid && canVoid())?`<button onclick="openVoidModal('damage','${d.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this report"><i class="ti ti-trash-x"></i></button>`:""}</div></div>`; }).join(""):'<div class="empty-state">No damage reports yet.</div>';
 }
 
 async function loadTransfers(){
@@ -1748,7 +1903,7 @@ async function loadTransfers(){
   const list=[]; snaps.forEach(d=>list.push({id:d.id,...d.data()}));
   const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
   const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
-  document.getElementById("transfer-list").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:40%"><col style="width:26%"><col style="width:16%"></colgroup><thead><tr><th>Date</th><th>Route</th><th>Product</th><th>Qty</th></tr></thead><tbody>${list.map(t=>{ const d=t.createdAt&&t.createdAt.toDate?t.createdAt.toDate():new Date(); return `<tr><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${bMap[t.fromBranchId]||"?"} → ${bMap[t.toBranchId]||"?"}</td><td>${pMap[t.productId]||"—"}</td><td>${t.quantity}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No transfers yet.</div>';
+  document.getElementById("transfer-list").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:14%"><col style="width:32%"><col style="width:22%"><col style="width:14%"><col style="width:18%"></colgroup><thead><tr><th>Date</th><th>Route</th><th>Product</th><th>Qty</th><th></th></tr></thead><tbody>${list.map(t=>{ const d=t.createdAt&&t.createdAt.toDate?t.createdAt.toDate():new Date(); const isVoid=t.isVoided; const summary=(bMap[t.fromBranchId]||"?")+" → "+(bMap[t.toBranchId]||"?")+"<br>"+(pMap[t.productId]||"—")+" x"+t.quantity; const summaryEsc=summary.replace(/"/g,"&quot;"); return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${bMap[t.fromBranchId]||"?"} → ${bMap[t.toBranchId]||"?"}${isVoid?' <span class="badge br" style="font-size:9px">voided</span>':''}</td><td>${pMap[t.productId]||"—"}</td><td>${t.quantity}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('transfer','${t.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this transfer"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No transfers yet.</div>';
 }
 
 async function loadMovements(){
@@ -1757,7 +1912,7 @@ async function loadMovements(){
   const list=[]; snaps.forEach(d=>list.push({id:d.id,...d.data()}));
   const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
   const tb={receipt:"bg",transfer_out:"bb",transfer_in:"bb",adjustment:"ba",sale:"bg",damage:"br"};
-  document.getElementById("tab-movement").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:26%"><col style="width:34%"><col style="width:22%"></colgroup><thead><tr><th>Date</th><th>Type</th><th>Product</th><th>Qty</th></tr></thead><tbody>${list.map(m=>{ const d=m.createdAt&&m.createdAt.toDate?m.createdAt.toDate():new Date(); return `<tr><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${tb[m.type]||"bgr"}">${m.type}</span></td><td>${pMap[m.productId]||"—"}</td><td>${m.quantity>0?"+":""}${m.quantity}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No movements yet.</div>';
+  document.getElementById("tab-movement").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:14%"><col style="width:22%"><col style="width:28%"><col style="width:18%"><col style="width:18%"></colgroup><thead><tr><th>Date</th><th>Type</th><th>Product</th><th>Qty</th><th></th></tr></thead><tbody>${list.map(m=>{ const d=m.createdAt&&m.createdAt.toDate?m.createdAt.toDate():new Date(); const isVoid=m.isVoided; const summary=(pMap[m.productId]||"—")+"<br>"+(m.type||"")+" · Qty: "+m.quantity; const summaryEsc=summary.replace(/"/g,"&quot;"); return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${tb[m.type]||"bgr"}">${isVoid?"voided":m.type}</span></td><td>${pMap[m.productId]||"—"}</td><td>${m.quantity>0?"+":""}${m.quantity}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('adjustment','${m.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this movement"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No movements yet.</div>';
 }
 
 function renderNotifications(list){
@@ -2293,16 +2448,24 @@ window.loadCustDetailCreditLog = async (customerId) => {
   const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
   list.sort((a,b)=>{ const ta=a.createdAt?.toDate?a.createdAt.toDate():new Date(0); const tb=b.createdAt?.toDate?b.createdAt.toDate():new Date(0); return tb-ta; });
   const actionColors = { given:"br", arrested:"bg", adjusted:"ba", increased:"bb" };
-  document.getElementById("cdt-credit").innerHTML = list.length ? list.map(c => `
-    <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
-      <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-        <span class="badge ${actionColors[c.action]||"bgr"}">${c.action}</span>
-        <span style="font-weight:700;font-size:13px">ETB ${(c.amount||0).toLocaleString()}</span>
+  document.getElementById("cdt-credit").innerHTML = list.length ? list.map(c => {
+    const isVoid = c.isVoided;
+    const summary = "<b>"+(c.action||"")+"</b><br>ETB "+(c.amount||0).toLocaleString()+(c.note?" · "+c.note:"");
+    const summaryEsc = summary.replace(/"/g,"&quot;");
+    return `
+    <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0;${isVoid?'opacity:.5;text-decoration:line-through':''}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+        <span class="badge ${actionColors[c.action]||"bgr"}">${isVoid?"voided":c.action}</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-weight:700;font-size:13px">ETB ${(c.amount||0).toLocaleString()}</span>
+          ${(!isVoid && canVoid() && c.action !== "adjusted") ? `<button onclick="openVoidModal('credit','${c.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:15px" title="Void this credit action"><i class="ti ti-trash-x"></i></button>` : ""}
+        </div>
       </div>
       <div style="font-size:11px;color:#666">${c.note||""}</div>
       <div style="font-size:11px;color:#666">By: <strong>${sMap[c.doneBy]||"—"}</strong></div>
       <div style="font-size:11px;color:#999;margin-top:2px"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtTs(c.createdAt)}</div>
-    </div>`).join("") : '<div class="empty-state">No credit history yet</div>';
+    </div>`;
+  }).join("") : '<div class="empty-state">No credit history yet</div>';
 };
 
 // ══════════════════════════════════════════════════════════
@@ -2773,5 +2936,17 @@ document.getElementById("main-app").style.display="none";
     <div style="font-size:11px;color:var(--color-text-secondary);text-align:center">Theme is saved on this device</div>
   </div>
 </div>
+
+<!-- VOID RECORD MODAL -->
+<div class="modal-bg" id="modal-void"><div class="modal">
+  <div class="modal-title">Void Record <button onclick="closeModal('modal-void')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div style="background:#FCEBEB;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#791F1F">
+    <i class="ti ti-alert-triangle" style="font-size:14px;vertical-align:-2px"></i>
+    This will undo the record's effect on stock, credit, or balances, and mark it as voided. This cannot be undone.
+  </div>
+  <div id="void-record-summary" style="background:var(--color-background-secondary);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px"></div>
+  <div class="form-field"><label>Reason for voiding (required)</label><textarea id="inp-void-reason" rows="2" placeholder="e.g. Wrong quantity entered, wrong customer selected…"></textarea></div>
+  <button class="btn" style="width:100%;background:#E24B4A;color:#fff;border-color:#A32D2D" onclick="confirmVoid()"><i class="ti ti-trash-x"></i> Void This Record</button>
+</div></div>
 </body>
 </html>
