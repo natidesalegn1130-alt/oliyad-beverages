@@ -421,8 +421,17 @@ window._orderBranchStock = {}; // productId -> available qty for selected branch
 window.onOrderBranchChange = async () => {
   const branchId = document.getElementById("inp-order-branch").value;
   const productSelect = document.getElementById("inp-order-product");
+  const customerSelect = document.getElementById("inp-order-customer");
   productSelect.innerHTML = '<option value="">Select product…</option>';
   window._orderBranchStock = {};
+
+  // Reset and repopulate customer dropdown filtered by branch
+  customerSelect.innerHTML = '<option value="">Select customer…</option><option value="walkin">\ud83d\udc64 Walk-in / One-time Customer</option>';
+  if (branchId) {
+    const branchCustomers = (window._customers||[]).filter(c => c.branchId === branchId);
+    branchCustomers.forEach(cu => { const o = document.createElement("option"); o.value = cu.id; o.textContent = cu.name; customerSelect.appendChild(o); });
+  }
+
   if (!branchId) { onBranchOrProductChange(); return; }
   const db = window.DB; const FS = window.FS;
   const stockSnaps = await FS.getDocs(FS.query(FS.collection(db, "stock"), FS.where("branchId","==",branchId)));
@@ -544,6 +553,22 @@ window.toggleWalkinName = () => {
   const field = document.getElementById("walkin-name-field");
   if (field) field.style.display = val === "walkin" ? "block" : "none";
   if (val !== "walkin") { const n=document.getElementById("inp-walkin-name"); if(n) n.value=""; }
+
+  // Walk-in customers can only pay Cash or Bank - no credit, no partial
+  const paySelect = document.getElementById("inp-order-payment");
+  const creditOpt = paySelect.querySelector('option[value="credit"]');
+  const partialOpt = paySelect.querySelector('option[value="partial"]');
+  if (val === "walkin") {
+    if (creditOpt) creditOpt.disabled = true;
+    if (partialOpt) partialOpt.disabled = true;
+    if (paySelect.value === "credit" || paySelect.value === "partial") {
+      paySelect.value = "cash";
+      togglePartialPayment();
+    }
+  } else {
+    if (creditOpt) creditOpt.disabled = false;
+    if (partialOpt) partialOpt.disabled = false;
+  }
 };
 
 window.togglePartialPayment = () => {
@@ -1041,7 +1066,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
       <div class="page-title" style="font-size:18px;font-weight:700;margin-bottom:14px">Welcome back, <span id="dash-welcome">there</span>!</div>
 
       <div class="dash-grid">
-        <div class="dash-card" onclick="navToTab('orders','tab-orders-list')">
+        <div class="dash-card" onclick="window._ordersFilter='all';navToTab('orders','tab-orders-list')">
           <div class="dash-card-icon"><i class="ti ti-receipt"></i></div>
           <div class="dash-card-label">Sales</div>
           <div class="dash-card-value" id="dash-orders">—</div>
@@ -1053,7 +1078,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
           <div class="dash-card-value" id="dash-lowstock" style="color:#E24B4A">—</div>
           <div class="dash-card-sub">Low stock items</div>
         </div>
-        <div class="dash-card" onclick="navToTab('orders','tab-orders-list')">
+        <div class="dash-card" onclick="window._ordersFilter='unpaid';navToTab('orders','tab-orders-list')">
           <div class="dash-card-icon"><i class="ti ti-alert-circle"></i></div>
           <div class="dash-card-label">Unpaid Orders</div>
           <div class="dash-card-value" id="dash-unpaid" style="color:#E24B4A">—</div>
@@ -1176,7 +1201,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
         </div>
       </div>
 
-      <button class="btn btn-primary" style="width:100%" onclick="openModal('modal-order')">
+      <button class="btn btn-primary" style="width:100%" onclick="createOrderFromCalc()">
         <i class="ti ti-file-invoice"></i> Create Order from This Calculation
       </button>
     </div>
@@ -1262,6 +1287,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
 
 <div class="modal-bg" id="modal-order"><div class="modal" style="max-width:400px">
   <div class="modal-title">New Order <button onclick="closeModal('modal-order')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-field"><label>Branch</label><select id="inp-order-branch" onchange="onOrderBranchChange()"><option value="">Select branch…</option></select></div>
   <div class="form-row">
     <div class="form-field"><label>Customer</label>
       <select id="inp-order-customer" onchange="toggleWalkinName()">
@@ -1285,7 +1311,6 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
     <div class="form-field"><label>Amount Paid Now (ETB)</label><input id="inp-order-partial-amount" type="number" placeholder="0" style="border-color:#EF9F27"></div>
     <div style="font-size:11px;color:#EF9F27;margin-bottom:8px">Remaining amount will be recorded as credit</div>
   </div>
-  <div class="form-field"><label>Branch</label><select id="inp-order-branch" onchange="onOrderBranchChange()"><option value="">Select branch…</option></select></div>
 
   <div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-bottom:10px">
     <div style="font-size:12px;font-weight:500;color:#666;margin-bottom:8px">ADD PRODUCTS</div>
@@ -1714,7 +1739,7 @@ async function loadDashboard(){
       FS.getDocs(FS.query(FS.collection(db,"notifications"),FS.orderBy("createdAt","desc"),FS.limit(10)))
     ]);
     let orders=[],unpaid=0,lowStock=0;
-    oSnap.forEach(d=>{ const data=d.data(); if(u.role==="ceo"||data.branchId===u.branchId){ orders.push(data); if(data.paymentStatus!=="paid") unpaid++; } });
+    oSnap.forEach(d=>{ const data=d.data(); if(u.role==="ceo"||data.branchId===u.branchId){ orders.push(data); if(!data.isVoided && data.paymentStatus!=="paid") unpaid++; } });
     sSnap.forEach(d=>{ if(d.data().quantity<50) lowStock++; });
     document.getElementById("dash-orders").textContent=orders.length;
     document.getElementById("dash-unpaid").textContent=unpaid;
@@ -1844,12 +1869,31 @@ function renderStock(list){
   document.getElementById("tab-stock").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:36%"><col style="width:30%"><col style="width:34%"></colgroup><thead><tr><th>Product</th><th>Branch</th><th>Qty</th></tr></thead><tbody>${list.map(s=>`<tr><td>${pMap[s.productId]||s.productId}</td><td>${bMap[s.branchId]||s.branchId}</td><td>${s.quantity<20?`<span style="color:#E24B4A;font-weight:700">${s.quantity}</span>`:s.quantity<50?`<span style="color:#EF9F27;font-weight:700">${s.quantity}</span>`:s.quantity}${expBadge2(s)}</td></tr>`).join("")}</tbody></table></div>`+btn;
 }
 
+window._lastOrdersList = [];
+window._ordersFilter = "all"; // "all" | "unpaid"
+
 function renderOrders(list){
+  window._lastOrdersList = list;
   const cMap={}; (window._customers||[]).forEach(c=>cMap[c.id]=c.name);
   const sb={paid:"bg",unpaid:"ba",partial:"bb",credit:"br"};
-  if(!list.length){ document.getElementById("tab-orders-list").innerHTML='<div class="empty-state">No orders yet.</div>'; return; }
-  document.getElementById("tab-orders-list").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:32%"><col style="width:24%"><col style="width:18%"><col style="width:14%"><col style="width:12%"></colgroup><thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${list.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); const isVoid=o.isVoided; const custName=cMap[o.customerId]||"—"; const summary="<b>"+custName+"</b><br>ETB "+(o.totalAmount||0).toLocaleString()+" · "+(o.paymentStatus||"")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td><b>${custName}</b></td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${isVoid?"voided":o.paymentStatus}</span></td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('order','${o.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this order"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
+
+  const filtered = window._ordersFilter === "unpaid"
+    ? list.filter(o => !o.isVoided && o.paymentStatus !== "paid")
+    : list;
+
+  const filterBar = `<div style="display:flex;gap:6px;margin-bottom:8px">
+    <button class="btn btn-sm ${window._ordersFilter==='all'?'btn-primary':''}" onclick="setOrdersFilter('all')">All Orders</button>
+    <button class="btn btn-sm ${window._ordersFilter==='unpaid'?'btn-primary':''}" onclick="setOrdersFilter('unpaid')" style="${window._ordersFilter==='unpaid'?'':'color:#E24B4A;border-color:#F09595'}">Unpaid Only</button>
+  </div>`;
+
+  if(!filtered.length){ document.getElementById("tab-orders-list").innerHTML=filterBar+'<div class="empty-state">No orders to show.</div>'; return; }
+  document.getElementById("tab-orders-list").innerHTML=filterBar+`<div class="card"><table class="tbl"><colgroup><col style="width:32%"><col style="width:24%"><col style="width:18%"><col style="width:14%"><col style="width:12%"></colgroup><thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${filtered.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); const isVoid=o.isVoided; const custName=cMap[o.customerId]||"—"; const summary="<b>"+custName+"</b><br>ETB "+(o.totalAmount||0).toLocaleString()+" · "+(o.paymentStatus||"")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); const partialNote=(o.paymentStatus==="partial"&&!isVoid)?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${(o.paidAmount||0).toLocaleString()} paid)</div>`:""; return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td><b>${custName}</b></td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${isVoid?"voided":o.paymentStatus}</span>${partialNote}</td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('order','${o.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this order"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
+
+window.setOrdersFilter = (mode) => {
+  window._ordersFilter = mode;
+  renderOrders(window._lastOrdersList);
+};
 
 function renderCustomers(list){
   const addBtn='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-primary btn-sm" onclick="openModal(\'modal-customer\')"><i class="ti ti-user-plus"></i> Add Customer</button></div>';
@@ -1928,6 +1972,17 @@ function renderStaff(list){
 
 // ── CALCULATOR ───────────────────────────────────────────────
 window._calcItems = [];
+
+window.createOrderFromCalc = () => {
+  if (!window._calcItems.length) { alert("Add at least one product to the calculation first."); return; }
+  openModal("modal-order");
+  // initOrderForm() runs inside openModal and resets _orderItems - so copy AFTER that
+  setTimeout(() => {
+    window._orderItems = window._calcItems.map(item => ({ ...item }));
+    renderOrderItems();
+    updateOrderTotal();
+  }, 0);
+};
 
 window.onCalcBranchChange = () => {
   // repopulate products when branch changes
@@ -2301,9 +2356,9 @@ window.loadBranchDetailStock = async (branchId) => {
   const db = window.DB; const FS = window.FS;
   const snaps = await FS.getDocs(FS.query(FS.collection(db,"stock"), FS.where("branchId","==",branchId)));
   const pMap = {}; (window._products||[]).forEach(p => pMap[p.id] = p);
-  const list = []; snaps.forEach(d => list.push({ id: d.id, ...d.data() }));
+  const list = []; snaps.forEach(d => { const data = d.data(); if ((data.quantity||0) > 0) list.push({ id: d.id, ...data }); });
   const el = document.getElementById("bdt-stock");
-  if (!list.length) { el.innerHTML = '<div class="empty-state">No stock in this branch</div>'; return; }
+  if (!list.length) { el.innerHTML = '<div class="empty-state">No stock available in this branch</div>'; return; }
   // group by brand
   const byBrand = {};
   list.forEach(s => {
@@ -2360,7 +2415,7 @@ window.loadBranchDetailOrders = async (branchId) => {
   document.getElementById("bdt-orders").innerHTML = list.length ? `<table class="tbl">
     <colgroup><col style="width:34%"><col style="width:28%"><col style="width:18%"><col style="width:20%"></colgroup>
     <thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
-    <tbody>${list.map(o => `<tr><td>${cMap[o.customerId]||"Walk-in"}</td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span></td><td style="font-size:11px">${fmtTs(o.createdAt)}</td></tr>`).join("")}</tbody>
+    <tbody>${list.map(o => `<tr><td>${cMap[o.customerId]||"Walk-in"}</td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span>${o.paymentStatus==="partial"?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${(o.paidAmount||0).toLocaleString()} paid)</div>`:""}</td><td style="font-size:11px">${fmtTs(o.createdAt)}</td></tr>`).join("")}</tbody>
   </table>` : '<div class="empty-state">No orders yet</div>';
 };
 
@@ -2538,6 +2593,8 @@ window.saveCreditAction = async () => {
       note: note || "Credit settlement",
       createdAt: FS.serverTimestamp()
     });
+    // Apply this payment to the customer's oldest unpaid orders first (FIFO)
+    await applyPaymentFIFO(customerId, amount);
     const staffNameCr = u.fullName || "Staff";
     await FS.addDoc(FS.collection(db, "notifications"), {
       type: "payment",
@@ -2557,6 +2614,35 @@ window.saveCreditAction = async () => {
 // 8. PAYMENT WITH BANK TRANSFER TO / HANDLED BY
 // ══════════════════════════════════════════════════════════
 // savePayment - with credit deduction, notification, and bank transfer support
+// FIFO: apply a payment amount across a customer's oldest unpaid orders first
+window.applyPaymentFIFO = async (customerId, amount) => {
+  if (!customerId || customerId === "walkin" || amount <= 0) return;
+  const db = window.DB; const FS = window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db, "orders"), FS.where("customerId","==",customerId)));
+  const unpaidOrders = [];
+  snaps.forEach(d => {
+    const data = d.data();
+    if (!data.isVoided && data.paymentStatus !== "paid") unpaidOrders.push({ id: d.id, ...data });
+  });
+  // Oldest first
+  unpaidOrders.sort((a,b) => {
+    const ta = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+    const tb = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+    return ta - tb;
+  });
+  let remaining = amount;
+  for (const o of unpaidOrders) {
+    if (remaining <= 0) break;
+    const owed = (o.totalAmount || 0) - (o.paidAmount || 0);
+    if (owed <= 0) continue;
+    const applyAmt = Math.min(remaining, owed);
+    const newPaid = (o.paidAmount || 0) + applyAmt;
+    const newStatus = newPaid >= o.totalAmount ? "paid" : "partial";
+    await FS.updateDoc(FS.doc(db, "orders", o.id), { paidAmount: newPaid, paymentStatus: newStatus, updatedAt: FS.serverTimestamp() });
+    remaining -= applyAmt;
+  }
+};
+
 window.savePayment = async () => {
   const orderId    = document.getElementById("inp-pay-order").value.trim();
   const customerId = document.getElementById("inp-pay-customer").value;
@@ -2582,6 +2668,9 @@ window.savePayment = async () => {
       const status  = newPaid >= o.totalAmount ? "paid" : "partial";
       await FS.updateDoc(oRef, { paidAmount: newPaid, paymentStatus: status, updatedAt: FS.serverTimestamp() });
     }
+  } else if (customerId && customerId !== "walkin") {
+    // No specific order chosen - apply payment to oldest unpaid orders first (FIFO)
+    await applyPaymentFIFO(customerId, amount);
   }
   // Update customer outstanding balance + notification + credit log
   if (customerId) {
