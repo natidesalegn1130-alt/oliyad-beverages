@@ -1973,15 +1973,24 @@ function renderStaff(list){
 // ── CALCULATOR ───────────────────────────────────────────────
 window._calcItems = [];
 
-window.createOrderFromCalc = () => {
+window.createOrderFromCalc = async () => {
   if (!window._calcItems.length) { alert("Add at least one product to the calculation first."); return; }
+  const calcBranchId = document.getElementById("calc-branch-sel").value;
+  if (!calcBranchId) { alert("Please select a branch in the Price Calculator first."); return; }
   openModal("modal-order");
-  // initOrderForm() runs inside openModal and resets _orderItems - so copy AFTER that
-  setTimeout(() => {
+  // initOrderForm() runs inside openModal and resets _orderItems — copy AFTER that
+  setTimeout(async () => {
+    // Pre-fill branch and trigger branch-aware filtering
+    const branchSel = document.getElementById("inp-order-branch");
+    if (branchSel) {
+      branchSel.value = calcBranchId;
+      await onOrderBranchChange(); // loads branch stock + filters customers
+    }
+    // Now copy items — stock already validated in addCalcItem
     window._orderItems = window._calcItems.map(item => ({ ...item }));
     renderOrderItems();
     updateOrderTotal();
-  }, 0);
+  }, 100);
 };
 
 window.onCalcBranchChange = () => {
@@ -2209,14 +2218,28 @@ window.addCalcItem = async () => {
   const productId = document.getElementById("calc-product-sel").value;
   const branchId  = document.getElementById("calc-branch-sel").value;
   const priceType = document.getElementById("calc-price-type").value;
-  const qty       = parseInt(document.getElementById("calc-qty-inp").value) || 1;
+  let qty         = parseInt(document.getElementById("calc-qty-inp").value) || 1;
   if (!productId || !branchId) { alert("Select branch and product first"); return; }
+
+  // Check stock availability at this branch
+  const db = window.DB; const FS = window.FS;
+  const stockSnap = await FS.getDoc(FS.doc(db, "stock", branchId + "_" + productId));
+  const availableQty = stockSnap.exists() ? (stockSnap.data().quantity || 0) : 0;
+  // Account for qty already in the calc for this product
+  const alreadyInCalc = window._calcItems.filter(i=>i.productId===productId).reduce((s,i)=>s+i.qty,0);
+  const remaining = Math.max(0, availableQty - alreadyInCalc);
+  if (remaining <= 0) { alert("This product is out of stock at the selected branch."); return; }
+  if (qty > remaining) {
+    alert("Only " + remaining + " case(s) available at this branch. Adding " + remaining + " instead.");
+    qty = remaining;
+  }
+
   const prices = await getProductPrices(productId, branchId);
   const price = priceType === "wholesale" ? prices.wholesale : prices.retail;
   if (!price) { alert("No " + priceType + " price set for this product. Ask CEO to set prices."); return; }
   const product = (window._products||[]).find(p => p.id === productId);
   const subtotal = price * qty;
-  window._calcItems.push({ productId, productName: product ? product.name : productId, qty, price, priceType, subtotal });
+  window._calcItems.push({ productId, productName: product ? product.name : productId, qty, price, priceType, subtotal, branchId });
   renderCalcItems();
   document.getElementById("calc-qty-inp").value = 1;
   document.getElementById("calc-product-sel").value = "";
