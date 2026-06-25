@@ -498,6 +498,7 @@ window.saveOrder = async () => {
     creditGiven, paymentStatus,
     status: "confirmed", createdBy: window.CURRENT_USER.uid,
     itemCount: window._orderItems.length,
+    itemsSummary: window._orderItems.map(i=>i.productName+" x"+i.qty).join(", "),
     createdAt: FS.serverTimestamp(), updatedAt: FS.serverTimestamp()
   });
   for (const item of window._orderItems) {
@@ -655,6 +656,165 @@ window.saveExpense = async () => {
   setLoading(false);
 };
 
+// ── MULTI-PRODUCT DAMAGE REPORT ──────────────────────────
+window._dmgItems = [];
+window.initDamageForm = () => {
+  window._dmgItems = [];
+  addDmgProduct();
+};
+window.addDmgProduct = () => {
+  window._dmgItems.push({ productId:"", qty:0, reason:"transit_damage", note:"" });
+  renderDmgProducts();
+};
+window.removeDmgProduct = (idx) => {
+  window._dmgItems.splice(idx,1);
+  if(!window._dmgItems.length) addDmgProduct();
+  else renderDmgProducts();
+};
+window.renderDmgProducts = () => {
+  const container = document.getElementById("dmg-products-container");
+  if(!container) return;
+  const pOpts = (window._products||[]).map(p=>`<option value="${p.id}" ${window._dmgItems[0]&&window._dmgItems[0].productId===p.id?"":""}>${p.name}</option>`).join("");
+  container.innerHTML = window._dmgItems.map((item,idx)=>`
+    <div style="border:0.5px solid #f0d0d0;border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:#fff8f8;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0d0d0">
+        <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
+        ${window._dmgItems.length>1?`<button onclick="removeDmgProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
+      </div>
+      <div style="padding:10px 12px">
+        <div class="form-row">
+          <div class="form-field" style="flex:2">
+            <label>Product</label>
+            <select onchange="window._dmgItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              <option value="">Select product…</option>
+              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-field" style="flex:1">
+            <label>Cases</label>
+            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._dmgItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Reason</label>
+          <select onchange="window._dmgItems[${idx}].reason=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+            <option value="spilling" ${item.reason==="spilling"?"selected":""}>Spilling (leaking)</option>
+            <option value="missing_items" ${item.reason==="missing_items"?"selected":""}>Missing items</option>
+            <option value="packaging_damaged" ${item.reason==="packaging_damaged"?"selected":""}>Packaging damaged</option>
+            <option value="transit_damage" ${(!item.reason||item.reason==="transit_damage")?"selected":""}>Transit damage</option>
+            <option value="expired" ${item.reason==="expired"?"selected":""}>Expired</option>
+            <option value="theft" ${item.reason==="theft"?"selected":""}>Theft</option>
+            <option value="other" ${item.reason==="other"?"selected":""}>Other</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Notes</label>
+          <input type="text" placeholder="Optional notes…" value="${item.note||""}" oninput="window._dmgItems[${idx}].note=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+        </div>
+      </div>
+    </div>`).join("");
+};
+window.saveDamageMulti = async () => {
+  const branchId = document.getElementById("inp-dmg-branch").value;
+  if(!branchId){alert("Select a branch");return;}
+  const valid = window._dmgItems.filter(x=>x.productId&&x.qty>0);
+  if(!valid.length){alert("Add at least one product with quantity");return;}
+  setLoading(true);
+  const db=window.DB; const FS=window.FS;
+  const branchName=(window._branches||[]).find(b=>b.id===branchId)?.name||"Branch";
+  const staffName=window.CURRENT_USER?.fullName||"Staff";
+  const summaryParts=[];
+  for(const item of valid){
+    const prodName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
+    await FS.addDoc(FS.collection(db,"damagedStock"),{branchId,productId:item.productId,quantity:item.qty,reason:item.reason,note:item.note,reportedBy:window.CURRENT_USER?.uid,createdAt:FS.serverTimestamp()});
+    const sid=branchId+"_"+item.productId;
+    const sRef=FS.doc(db,"stock",sid);
+    const sSnap=await FS.getDoc(sRef);
+    if(sSnap.exists()) await FS.updateDoc(sRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
+    summaryParts.push(prodName+" ×"+item.qty+" ("+item.reason.replace(/_/g," ")+")");
+  }
+  await FS.addDoc(FS.collection(db,"notifications"),{type:"damage",title:"Damage reported — "+branchName,description:summaryParts.join(" | ")+" · By "+staffName,branchId,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
+  closeModal("modal-damage");
+  window._dmgItems=[];
+  loadDamage(); loadStock();
+  setLoading(false);
+  alert("✓ "+valid.length+" damage report(s) submitted!");
+};
+
+// ── MULTI-PRODUCT TRANSFER ────────────────────────────────
+window._trItems = [];
+window.initTransferForm = () => {
+  window._trItems = [];
+  addTrProduct();
+};
+window.addTrProduct = () => {
+  window._trItems.push({ productId:"", qty:0 });
+  renderTrProducts();
+};
+window.removeTrProduct = (idx) => {
+  window._trItems.splice(idx,1);
+  if(!window._trItems.length) addTrProduct();
+  else renderTrProducts();
+};
+window.renderTrProducts = () => {
+  const container = document.getElementById("tr-products-container");
+  if(!container) return;
+  container.innerHTML = window._trItems.map((item,idx)=>`
+    <div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:#f9f9f9;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #e5e5e0">
+        <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
+        ${window._trItems.length>1?`<button onclick="removeTrProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
+      </div>
+      <div style="padding:10px 12px">
+        <div class="form-row">
+          <div class="form-field" style="flex:2">
+            <label>Product</label>
+            <select onchange="window._trItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              <option value="">Select product…</option>
+              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-field" style="flex:1">
+            <label>Qty (cases)</label>
+            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._trItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          </div>
+        </div>
+      </div>
+    </div>`).join("");
+};
+window.saveTransferMulti = async () => {
+  const fromBranch=document.getElementById("inp-tr-from").value;
+  const toBranch=document.getElementById("inp-tr-to").value;
+  if(!fromBranch||!toBranch){alert("Select both branches");return;}
+  if(fromBranch===toBranch){alert("From and To branches must be different");return;}
+  const valid=window._trItems.filter(x=>x.productId&&x.qty>0);
+  if(!valid.length){alert("Add at least one product with quantity");return;}
+  setLoading(true);
+  const db=window.DB; const FS=window.FS;
+  const fromName=(window._branches||[]).find(b=>b.id===fromBranch)?.name||"Branch";
+  const toName=(window._branches||[]).find(b=>b.id===toBranch)?.name||"Branch";
+  const staffName=window.CURRENT_USER?.fullName||"Staff";
+  const summaryParts=[];
+  for(const item of valid){
+    const prodName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
+    await FS.addDoc(FS.collection(db,"transfers"),{fromBranchId:fromBranch,toBranchId:toBranch,productId:item.productId,quantity:item.qty,status:"completed",createdBy:window.CURRENT_USER?.uid,createdAt:FS.serverTimestamp()});
+    await FS.updateDoc(FS.doc(db,"stock",fromBranch+"_"+item.productId),{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
+    const toRef=FS.doc(db,"stock",toBranch+"_"+item.productId);
+    const toSnap=await FS.getDoc(toRef);
+    if(toSnap.exists()) await FS.updateDoc(toRef,{quantity:FS.increment(item.qty),updatedAt:FS.serverTimestamp()});
+    else await FS.setDoc(toRef,{branchId:toBranch,productId:item.productId,quantity:item.qty,updatedAt:FS.serverTimestamp()});
+    summaryParts.push(prodName+" ×"+item.qty);
+  }
+  await FS.addDoc(FS.collection(db,"notifications"),{type:"transfer",title:"Stock transfer: "+fromName+" → "+toName,description:summaryParts.join(" | ")+" · By "+staffName,branchId:fromBranch,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
+  closeModal("modal-transfer");
+  window._trItems=[];
+  loadTransfers(); loadStock();
+  setLoading(false);
+  alert("✓ "+valid.length+" product(s) transferred!");
+};
+
+window.saveTransfer = async () => { saveTransferMulti(); };
+
 window.saveTransfer = async () => {
   const fromBranch = document.getElementById("inp-tr-from").value;
   const toBranch   = document.getElementById("inp-tr-to").value;
@@ -684,6 +844,168 @@ window.saveTransfer = async () => {
   closeModal("modal-transfer");
   loadStock();
   setLoading(false);
+};
+
+// ── MULTI-PRODUCT DAMAGE REPORT ─────────────────────────
+window._dmgItems = [];
+window.initDamageForm = () => {
+  window._dmgItems = [];
+  addDmgProduct();
+};
+window.addDmgProduct = () => {
+  window._dmgItems.push({ productId:"", qty:0, reason:"spilling", spill:0, missing:0, pkg:false, note:"" });
+  renderDmgProducts();
+};
+window.removeDmgProduct = (idx) => {
+  window._dmgItems.splice(idx,1);
+  if(!window._dmgItems.length) addDmgProduct();
+  else renderDmgProducts();
+};
+window.renderDmgProducts = () => {
+  const container = document.getElementById("dmg-products-container");
+  if(!container) return;
+  const pOpts = (window._products||[]).map(p=>`<option value="${p.id}" ${window._dmgItems[0]&&window._dmgItems[0].productId===p.id?"":""}>${p.name}</option>`).join("");
+  container.innerHTML = window._dmgItems.map((item,idx)=>`
+    <div style="border:0.5px solid #f0d0d0;border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:#fff8f8;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0d0d0">
+        <span style="font-size:12px;font-weight:600;color:#E24B4A">Product ${idx+1}</span>
+        ${window._dmgItems.length>1?`<button onclick="removeDmgProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
+      </div>
+      <div style="padding:10px 12px">
+        <div class="form-row">
+          <div class="form-field" style="flex:2"><label>Product</label>
+            <select onchange="window._dmgItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              <option value="">Select product…</option>
+              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-field" style="flex:1"><label>Cases Lost</label>
+            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._dmgItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          </div>
+        </div>
+        <div class="form-field"><label>Reason</label>
+          <select onchange="window._dmgItems[${idx}].reason=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+            <option value="spilling" ${item.reason==="spilling"?"selected":""}>Spilling (leaking)</option>
+            <option value="missing_items" ${item.reason==="missing_items"?"selected":""}>Missing items</option>
+            <option value="packaging_damaged" ${item.reason==="packaging_damaged"?"selected":""}>Packaging damaged</option>
+            <option value="spilling_and_missing" ${item.reason==="spilling_and_missing"?"selected":""}>Spilling + Missing</option>
+            <option value="expired" ${item.reason==="expired"?"selected":""}>Expired</option>
+            <option value="lost" ${item.reason==="lost"?"selected":""}>Lost</option>
+            <option value="theft" ${item.reason==="theft"?"selected":""}>Theft</option>
+            <option value="other" ${item.reason==="other"?"selected":""}>Other</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-field"><label>Spilling/case</label><input type="number" placeholder="0" min="0" value="${item.spill||""}" oninput="window._dmgItems[${idx}].spill=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
+          <div class="form-field"><label>Missing/case</label><input type="number" placeholder="0" min="0" value="${item.missing||""}" oninput="window._dmgItems[${idx}].missing=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:#f9f9f9;border-radius:6px;margin-bottom:6px">
+          <input type="checkbox" id="dmg-pkg-${idx}" ${item.pkg?"checked":""} onchange="window._dmgItems[${idx}].pkg=this.checked" style="width:14px;height:14px">
+          <label for="dmg-pkg-${idx}" style="font-size:12px;cursor:pointer">Packaging damaged</label>
+        </div>
+        <div class="form-field"><label>Notes</label><textarea rows="2" placeholder="Describe damage…" oninput="window._dmgItems[${idx}].note=this.value" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:12px;resize:none">${item.note||""}</textarea></div>
+      </div>
+    </div>`).join("");
+};
+window.saveDamageMulti = async () => {
+  const branchId = document.getElementById("inp-dmg-branch").value;
+  if(!branchId){alert("Select a branch");return;}
+  const valid = window._dmgItems.filter(i=>i.productId&&i.qty>0);
+  if(!valid.length){alert("Add at least one product with quantity");return;}
+  setLoading(true);
+  const db=window.DB;const FS=window.FS;
+  const bName=(window._branches||[]).find(b=>b.id===branchId)?.name||"Branch";
+  const staffName=window.CURRENT_USER?.fullName||"Staff";
+  const summaryParts=[];
+  for(const item of valid){
+    const pName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
+    await FS.addDoc(FS.collection(db,"damagedStock"),{branchId,productId:item.productId,quantity:item.qty,reason:item.reason,note:item.note,spillingItems:item.spill,missingItems:item.missing,packagingDamaged:item.pkg,reportedBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    const sid=branchId+"_"+item.productId;
+    const sRef=FS.doc(db,"stock",sid);
+    const sSnap=await FS.getDoc(sRef);
+    if(sSnap.exists())await FS.updateDoc(sRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
+    summaryParts.push(pName+" x"+item.qty+" ("+item.reason.replace(/_/g," ")+")");
+  }
+  await FS.addDoc(FS.collection(db,"notifications"),{type:"damage",title:"Damage reported — "+bName,description:summaryParts.join(" | ")+" · By "+staffName,branchId,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
+  closeModal("modal-damage");
+  window._dmgItems=[];
+  loadDamageList();
+  setLoading(false);
+  alert("✓ "+valid.length+" damage report(s) submitted!");
+};
+
+// ── MULTI-PRODUCT TRANSFER ───────────────────────────────
+window._trItems = [];
+window.initTransferForm = () => {
+  window._trItems = [];
+  addTrProduct();
+};
+window.addTrProduct = () => {
+  window._trItems.push({productId:"",qty:0});
+  renderTrProducts();
+};
+window.removeTrProduct = (idx) => {
+  window._trItems.splice(idx,1);
+  if(!window._trItems.length) addTrProduct();
+  else renderTrProducts();
+};
+window.renderTrProducts = () => {
+  const container=document.getElementById("tr-products-container");
+  if(!container) return;
+  container.innerHTML = window._trItems.map((item,idx)=>`
+    <div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:#f0f7ff;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #B5D4F4">
+        <span style="font-size:12px;font-weight:600;color:#1558B0">Product ${idx+1}</span>
+        ${window._trItems.length>1?`<button onclick="removeTrProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
+      </div>
+      <div style="padding:10px 12px">
+        <div class="form-row">
+          <div class="form-field" style="flex:2"><label>Product</label>
+            <select onchange="window._trItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              <option value="">Select product…</option>
+              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-field" style="flex:1"><label>Qty (cases)</label>
+            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._trItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          </div>
+        </div>
+      </div>
+    </div>`).join("");
+};
+window.saveTransferMulti = async () => {
+  const fromBranch=document.getElementById("inp-tr-from").value;
+  const toBranch=document.getElementById("inp-tr-to").value;
+  if(!fromBranch||!toBranch){alert("Select both branches");return;}
+  if(fromBranch===toBranch){alert("From and To branches must be different");return;}
+  const valid=window._trItems.filter(i=>i.productId&&i.qty>0);
+  if(!valid.length){alert("Add at least one product with quantity");return;}
+  setLoading(true);
+  const db=window.DB;const FS=window.FS;
+  const fromName=(window._branches||[]).find(b=>b.id===fromBranch)?.name||"Branch";
+  const toName=(window._branches||[]).find(b=>b.id===toBranch)?.name||"Branch";
+  const staffName=window.CURRENT_USER?.fullName||"Staff";
+  const summaryParts=[];
+  for(const item of valid){
+    const pName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
+    await FS.addDoc(FS.collection(db,"transfers"),{fromBranchId:fromBranch,toBranchId:toBranch,productId:item.productId,quantity:item.qty,status:"completed",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    const fromRef=FS.doc(db,"stock",fromBranch+"_"+item.productId);
+    const toRef=FS.doc(db,"stock",toBranch+"_"+item.productId);
+    const fromSnap=await FS.getDoc(fromRef);
+    const toSnap=await FS.getDoc(toRef);
+    if(fromSnap.exists())await FS.updateDoc(fromRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
+    if(toSnap.exists())await FS.updateDoc(toRef,{quantity:FS.increment(item.qty),updatedAt:FS.serverTimestamp()});
+    else await FS.setDoc(toRef,{branchId:toBranch,productId:item.productId,quantity:item.qty,updatedAt:FS.serverTimestamp()});
+    await FS.addDoc(FS.collection(db,"stockMovements"),{type:"transfer_out",branchId:fromBranch,productId:item.productId,quantity:-item.qty,reason:"branch_transfer",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    await FS.addDoc(FS.collection(db,"stockMovements"),{type:"transfer_in",branchId:toBranch,productId:item.productId,quantity:item.qty,reason:"branch_transfer",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    summaryParts.push(pName+" x"+item.qty);
+  }
+  await FS.addDoc(FS.collection(db,"notifications"),{type:"transfer",title:"Stock transfer: "+fromName+" → "+toName,description:summaryParts.join(" | ")+" · By "+staffName,branchId:fromBranch,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
+  closeModal("modal-transfer");
+  window._trItems=[];
+  loadTransferList();
+  setLoading(false);
+  alert("✓ "+valid.length+" product(s) transferred!");
 };
 
 window.saveDamage = async () => {
@@ -1378,50 +1700,29 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
   <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveExpense()"><i class="ti ti-check"></i> Save Expense</button>
 </div></div>
 
-<div class="modal-bg" id="modal-damage"><div class="modal">
+<div class="modal-bg" id="modal-damage"><div class="modal" style="max-width:420px;max-height:90vh;overflow-y:auto">
   <div class="modal-title">Report Damage / Loss <button onclick="closeModal('modal-damage')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
-  <div class="form-row">
-    <div class="form-field"><label>Branch</label><select id="inp-dmg-branch"><option value="">Select…</option></select></div>
-    <div class="form-field"><label>Product</label><select id="inp-dmg-product"><option value="">Select…</option></select></div>
-  </div>
-  <div class="form-row">
-    <div class="form-field"><label>Cases Lost/Damaged</label><input id="inp-dmg-qty" type="number" placeholder="0" min="0"></div>
-    <div class="form-field"><label>Main Reason</label>
-      <select id="inp-dmg-reason">
-        <option value="spilling">Spilling (liquid leaking)</option>
-        <option value="missing_items">Missing items from package</option>
-        <option value="packaging_damaged">Packaging damaged (plastic/cardboard)</option>
-        <option value="spilling_and_missing">Spilling + Missing items</option>
-        <option value="expired">Expired</option>
-        <option value="lost">Lost</option>
-        <option value="theft">Theft</option>
-        <option value="other">Other</option>
-      </select>
-    </div>
-  </div>
-  <div id="dmg-spill-section" style="display:none">
-    <div class="form-row">
-      <div class="form-field"><label>Spilling items per case</label><input id="inp-dmg-spill-count" type="number" placeholder="0" min="0"></div>
-      <div class="form-field"><label>Missing items per case</label><input id="inp-dmg-missing-count" type="number" placeholder="0" min="0"></div>
-    </div>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px;background:#f5f5f0;border-radius:8px">
-    <input type="checkbox" id="inp-dmg-pkg" style="width:16px;height:16px">
-    <label for="inp-dmg-pkg" style="font-size:13px;cursor:pointer">Plastic / Cardboard packaging also damaged</label>
-  </div>
-  <div class="form-field"><label>Notes</label><textarea id="inp-dmg-note" rows="2" placeholder="Describe what happened in detail"></textarea></div>
-  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveDamage()"><i class="ti ti-check"></i> Submit Report</button>
+  <div class="form-field"><label>Branch</label><select id="inp-dmg-branch"><option value="">Select branch…</option></select></div>
+  <div style="font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Damaged Products</div>
+  <div id="dmg-products-container"></div>
+  <button onclick="addDmgProduct()" style="width:100%;padding:9px;border:1.5px dashed #F09595;border-radius:8px;background:#fff8f8;color:#E24B4A;font-size:13px;font-weight:500;cursor:pointer;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:6px">
+    <i class="ti ti-plus" style="font-size:16px"></i> Add Another Product
+  </button>
+  <button class="btn btn-primary" style="width:100%" onclick="saveDamageMulti()"><i class="ti ti-check"></i> Submit All Reports</button>
 </div></div>
 
-<div class="modal-bg" id="modal-transfer"><div class="modal">
+<div class="modal-bg" id="modal-transfer"><div class="modal" style="max-width:420px;max-height:90vh;overflow-y:auto">
   <div class="modal-title">Stock Transfer <button onclick="closeModal('modal-transfer')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
   <div class="form-row">
     <div class="form-field"><label>From Branch</label><select id="inp-tr-from"><option value="">Select…</option></select></div>
     <div class="form-field"><label>To Branch</label><select id="inp-tr-to"><option value="">Select…</option></select></div>
   </div>
-  <div class="form-field"><label>Product</label><select id="inp-tr-product"><option value="">Select…</option></select></div>
-  <div class="form-field"><label>Quantity</label><input id="inp-tr-qty" type="number" placeholder="0"></div>
-  <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="saveTransfer()"><i class="ti ti-check"></i> Send Transfer</button>
+  <div style="font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:4px">Products to Transfer</div>
+  <div id="tr-products-container"></div>
+  <button onclick="addTrProduct()" style="width:100%;padding:9px;border:1.5px dashed #85B7EB;border-radius:8px;background:#f0f7ff;color:#1558B0;font-size:13px;font-weight:500;cursor:pointer;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:6px">
+    <i class="ti ti-plus" style="font-size:16px"></i> Add Another Product
+  </button>
+  <button class="btn btn-primary" style="width:100%" onclick="saveTransferMulti()"><i class="ti ti-check"></i> Send All Transfers</button>
 </div></div>
 
 <div class="modal-bg" id="modal-adjustment"><div class="modal" style="max-width:420px;max-height:90vh;overflow-y:auto">
@@ -1679,6 +1980,10 @@ function navToTab(pageId, tabId){
 function openModal(id){
   document.getElementById(id).classList.add("open");
   if(id==="modal-adjustment") initAdjustment();
+  if(id==="modal-damage") initDamageForm();
+  if(id==="modal-transfer") initTransferForm();
+  if(id==="modal-damage") initDamageForm();
+  if(id==="modal-transfer") initTransferForm();
   if(id==="modal-order") initOrderForm();
   if(id==="modal-set-price"){
     const branches=window._branches||[]; const products=window._products||[];
@@ -1712,7 +2017,7 @@ async function populateSelects(){
     branches.forEach(b=>{ const o=document.createElement("option"); o.value=b.id; o.textContent=b.name; el.appendChild(o); });
     if (prevVal && [...el.options].some(o=>o.value===prevVal)) el.value = prevVal;
   });
-  ["inp-order-product","inp-dmg-product","inp-tr-product","inp-adj-product"].forEach(id=>{
+  ["inp-order-product","inp-adj-product"].forEach(id=>{
     const el=document.getElementById(id); if(!el) return;
     const prevVal = el.value;
     el.innerHTML='<option value="">Select product…</option>';
@@ -1738,10 +2043,15 @@ async function loadDashboard(){
       FS.getDocs(FS.collection(db,"customers")),
       FS.getDocs(FS.query(FS.collection(db,"notifications"),FS.orderBy("createdAt","desc"),FS.limit(10)))
     ]);
-    let orders=[],unpaid=0,lowStock=0;
-    oSnap.forEach(d=>{ const data=d.data(); if(u.role==="ceo"||data.branchId===u.branchId){ orders.push(data); if(!data.isVoided && data.paymentStatus!=="paid") unpaid++; } });
+    let orders=[],unpaid=0,lowStock=0,todayOrders=0;
+    const todayStart=new Date(); todayStart.setHours(0,0,0,0);
+    oSnap.forEach(d=>{ const data=d.data(); if(u.role==="ceo"||data.branchId===u.branchId){
+      orders.push(data);
+      if(!data.isVoided && data.paymentStatus!=="paid") unpaid++;
+      if(!data.isVoided && data.createdAt&&data.createdAt.toDate&&data.createdAt.toDate()>=todayStart) todayOrders++;
+    } });
     sSnap.forEach(d=>{ if(d.data().quantity<50) lowStock++; });
-    document.getElementById("dash-orders").textContent=orders.length;
+    document.getElementById("dash-orders").textContent=todayOrders;
     document.getElementById("dash-unpaid").textContent=unpaid;
     document.getElementById("dash-lowstock").textContent=lowStock;
     document.getElementById("dash-customers").textContent=cSnap.size;
@@ -1887,7 +2197,7 @@ function renderOrders(list){
   </div>`;
 
   if(!filtered.length){ document.getElementById("tab-orders-list").innerHTML=filterBar+'<div class="empty-state">No orders to show.</div>'; return; }
-  document.getElementById("tab-orders-list").innerHTML=filterBar+`<div class="card"><table class="tbl"><colgroup><col style="width:32%"><col style="width:24%"><col style="width:18%"><col style="width:14%"><col style="width:12%"></colgroup><thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${filtered.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); const isVoid=o.isVoided; const custName=cMap[o.customerId]||"—"; const summary="<b>"+custName+"</b><br>ETB "+(o.totalAmount||0).toLocaleString()+" · "+(o.paymentStatus||"")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); const partialNote=(o.paymentStatus==="partial"&&!isVoid)?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${(o.paidAmount||0).toLocaleString()} paid)</div>`:""; return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td><b>${custName}</b></td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${isVoid?"voided":o.paymentStatus}</span>${partialNote}</td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('order','${o.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this order"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
+  document.getElementById("tab-orders-list").innerHTML=filterBar+`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:28%"><col style="width:16%"><col style="width:14%"><col style="width:10%"><col style="width:14%"></colgroup><thead><tr><th>Customer</th><th>Products</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${filtered.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); const isVoid=o.isVoided; const custName=cMap[o.customerId]||"—"; const summary="<b>"+custName+"</b><br>ETB "+(o.totalAmount||0).toLocaleString()+" · "+(o.paymentStatus||"")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); const partialNote=(o.paymentStatus==="partial"&&!isVoid)?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${(o.paidAmount||0).toLocaleString()} paid)</div>`:""; return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td><b>${custName}</b></td><td style="font-size:11px;color:#555">${o.itemsSummary||"—"}</td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${isVoid?"voided":o.paymentStatus}</span>${partialNote}</td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('order','${o.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this order"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 
 window.setOrdersFilter = (mode) => {
@@ -1952,11 +2262,12 @@ async function loadTransfers(){
 
 async function loadMovements(){
   const db=window.DB; const FS=window.FS;
-  const snaps=await FS.getDocs(FS.query(FS.collection(db,"stockMovements"),FS.orderBy("createdAt","desc"),FS.limit(30)));
+  const snaps=await FS.getDocs(FS.query(FS.collection(db,"stockMovements"),FS.orderBy("createdAt","desc"),FS.limit(50)));
   const list=[]; snaps.forEach(d=>list.push({id:d.id,...d.data()}));
   const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
+  const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
   const tb={receipt:"bg",transfer_out:"bb",transfer_in:"bb",adjustment:"ba",sale:"bg",damage:"br"};
-  document.getElementById("tab-movement").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:14%"><col style="width:22%"><col style="width:28%"><col style="width:18%"><col style="width:18%"></colgroup><thead><tr><th>Date</th><th>Type</th><th>Product</th><th>Qty</th><th></th></tr></thead><tbody>${list.map(m=>{ const d=m.createdAt&&m.createdAt.toDate?m.createdAt.toDate():new Date(); const isVoid=m.isVoided; const summary=(pMap[m.productId]||"—")+"<br>"+(m.type||"")+" · Qty: "+m.quantity; const summaryEsc=summary.replace(/"/g,"&quot;"); return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${tb[m.type]||"bgr"}">${isVoid?"voided":m.type}</span></td><td>${pMap[m.productId]||"—"}</td><td>${m.quantity>0?"+":""}${m.quantity}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('adjustment','${m.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this movement"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No movements yet.</div>';
+  document.getElementById("tab-movement").innerHTML=list.length?`<div class="card"><table class="tbl"><colgroup><col style="width:12%"><col style="width:16%"><col style="width:22%"><col style="width:22%"><col style="width:14%"><col style="width:14%"></colgroup><thead><tr><th>Date</th><th>Type</th><th>Branch</th><th>Product</th><th>Qty</th><th></th></tr></thead><tbody>${list.map(m=>{ const d=m.createdAt&&m.createdAt.toDate?m.createdAt.toDate():new Date(); const isVoid=m.isVoided; const summary=(pMap[m.productId]||"—")+"<br>"+(m.type||"")+" · Qty: "+m.quantity; const summaryEsc=summary.replace(/"/g,"&quot;"); return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td style="font-size:11px">${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td><span class="badge ${tb[m.type]||"bgr"}" style="font-size:10px">${isVoid?"voided":m.type}</span></td><td style="font-size:11px">${bMap[m.branchId]||"—"}</td><td style="font-size:12px">${pMap[m.productId]||"—"}</td><td style="font-weight:600;color:${m.quantity>0?"#1D9E75":"#E24B4A"}">${m.quantity>0?"+":""}${m.quantity}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('adjustment','${m.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this movement"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`:'<div class="empty-state">No movements yet.</div>';
 }
 
 function renderNotifications(list){
@@ -2468,13 +2779,12 @@ window.openCustomerDetail = async (customerId, customerName) => {
 window.switchCustDetailTab = (btn, tabId) => {
   btn.closest(".tab-bar").querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   btn.classList.add("active");
-  ["cdt-orders","cdt-payments","cdt-credit"].forEach(id => {
-    document.getElementById(id).style.display = id === tabId ? "block" : "none";
+  ["cdt-orders","cdt-activity"].forEach(id => {
+    const el=document.getElementById(id); if(el) el.style.display=id===tabId?"block":"none";
   });
   const cid = window._detailCustomerId;
   if (tabId === "cdt-orders")   loadCustDetailOrders(cid);
-  if (tabId === "cdt-payments") loadCustDetailPayments(cid);
-  if (tabId === "cdt-credit")   loadCustDetailCreditLog(cid);
+  if (tabId === "cdt-activity") loadCustDetailActivity(cid);
 };
 
 window.loadCustDetailOrders = async (customerId) => {
@@ -2516,6 +2826,33 @@ window.loadCustDetailPayments = async (customerId) => {
       <div style="font-size:11px;color:#666">Handled by: <strong>${sMap[p.receivedBy]||"—"}</strong></div>
       <div style="font-size:11px;color:#999;margin-top:2px"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtTs(p.createdAt)}</div>
     </div>`).join("") : '<div class="empty-state">No payments yet</div>';
+};
+
+window.loadCustDetailActivity = async (customerId) => {
+  const db=window.DB; const FS=window.FS;
+  const [paySnaps,creditSnaps,staffSnaps] = await Promise.all([
+    FS.getDocs(FS.query(FS.collection(db,"payments"),FS.where("customerId","==",customerId))),
+    FS.getDocs(FS.query(FS.collection(db,"creditLog"),FS.where("customerId","==",customerId))),
+    FS.getDocs(FS.collection(db,"staff"))
+  ]);
+  const sMap={}; staffSnaps.forEach(d=>sMap[d.id]=d.data().fullName);
+  const items=[];
+  paySnaps.forEach(d=>{ const p=d.data();
+    const mLabel={cash:"Cash",bank_transfer:"Bank Transfer",mobile_money:"Mobile Money",credit_settlement:"Credit Settlement"}[p.method]||p.method;
+    items.push({date:p.createdAt,amount:p.amount,sign:"-",color:"#1D9E75",label:"Payment received · "+mLabel,by:sMap[p.receivedBy]||"—",note:p.note||""});
+  });
+  creditSnaps.forEach(d=>{ const cr=d.data();
+    const isGiven=cr.action==="given";
+    const isArrested=cr.action==="arrest"||cr.action==="arrested";
+    const sign=isGiven?"+":(isArrested?"~":"-");
+    const color=isGiven?"#E24B4A":(isArrested?"#854F0B":"#1D9E75");
+    const label=isGiven?"Credit Given":isArrested?"Credit Settled":cr.action==="adjust"?"Balance Adjusted":cr.action==="increase_limit"?"Limit Increased":"Credit Action";
+    items.push({date:cr.createdAt,amount:cr.amount,sign,color,label,by:sMap[cr.doneBy]||"—",note:cr.note||""});
+  });
+  items.sort((a,b)=>{ const ta=a.date&&a.date.toDate?a.date.toDate():new Date(0); const tb=b.date&&b.date.toDate?b.date.toDate():new Date(0); return tb-ta; });
+  const el=document.getElementById("cdt-activity"); if(!el) return;
+  if(!items.length){el.innerHTML='<div class="empty-state">No account activity yet</div>'; return;}
+  el.innerHTML=items.map(item=>`<div style="padding:8px 0;border-bottom:0.5px solid #f0f0f0;display:flex;align-items:flex-start;gap:10px"><div style="width:32px;height:32px;border-radius:50%;background:${item.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:${item.color};flex-shrink:0">${item.sign}</div><div style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:13px;font-weight:600">${item.label}</span><span style="font-size:14px;font-weight:700;color:${item.color}">${item.sign}ETB ${item.amount.toLocaleString()}</span></div>${item.note?`<div style="font-size:11px;color:#666">${item.note}</div>`:""}<div style="font-size:11px;color:#999">By: ${item.by} · ${fmtTs(item.date)}</div></div></div>`).join("");
 };
 
 window.loadCustDetailCreditLog = async (customerId) => {
@@ -2832,6 +3169,152 @@ window.closeThemePicker = () => {
 
 document.getElementById("login-screen").style.display="none";
 document.getElementById("main-app").style.display="none";
+
+// ── MULTI-PRODUCT DAMAGE REPORT ──────────────────────────
+window._dmgItems = [];
+window.initDamageForm = () => { window._dmgItems = []; addDmgProduct(); };
+window.addDmgProduct = () => {
+  window._dmgItems.push({ productId:"", qty:0, reason:"spilling", note:"" });
+  renderDmgProducts();
+};
+window.removeDmgProduct = (idx) => {
+  window._dmgItems.splice(idx,1);
+  if(!window._dmgItems.length) addDmgProduct(); else renderDmgProducts();
+};
+window.renderDmgProducts = () => {
+  const container = document.getElementById("dmg-products-container");
+  if(!container) return;
+  const pOpts = (window._products||[]).map(p=>`<option value="${p.id}" ${window._dmgItems[0]?.productId===p.id?"selected":""}>${p.name}</option>`).join("");
+  container.innerHTML = window._dmgItems.map((item,idx) => {
+    const pOptsI = (window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("");
+    return `<div style="border:0.5px solid #f0d0d0;border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:#fff8f8;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0d0d0">
+        <span style="font-size:12px;font-weight:600;color:#E24B4A">Product ${idx+1}</span>
+        ${window._dmgItems.length>1?`<button onclick="removeDmgProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
+      </div>
+      <div style="padding:10px 12px">
+        <div class="form-row">
+          <div class="form-field" style="flex:2"><label>Product</label>
+            <select onchange="window._dmgItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              <option value="">Select…</option>${pOptsI}
+            </select>
+          </div>
+          <div class="form-field" style="flex:1"><label>Cases Lost</label>
+            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._dmgItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          </div>
+        </div>
+        <div class="form-field"><label>Reason</label>
+          <select onchange="window._dmgItems[${idx}].reason=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+            <option value="spilling" ${item.reason==="spilling"?"selected":""}>Spilling (leaking)</option>
+            <option value="missing_items" ${item.reason==="missing_items"?"selected":""}>Missing items</option>
+            <option value="packaging_damaged" ${item.reason==="packaging_damaged"?"selected":""}>Packaging damaged</option>
+            <option value="transit_damage" ${item.reason==="transit_damage"?"selected":""}>Transit damage</option>
+            <option value="expired" ${item.reason==="expired"?"selected":""}>Expired</option>
+            <option value="theft" ${item.reason==="theft"?"selected":""}>Theft</option>
+            <option value="other" ${item.reason==="other"?"selected":""}>Other</option>
+          </select>
+        </div>
+        <div class="form-field"><label>Notes</label>
+          <textarea rows="2" placeholder="Describe what happened…" oninput="window._dmgItems[${idx}].note=this.value" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:12px;resize:none">${item.note||""}</textarea>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+};
+window.saveDamageMulti = async () => {
+  const branchId = document.getElementById("inp-dmg-branch").value;
+  if(!branchId){alert("Select a branch");return;}
+  const valid = window._dmgItems.filter(x=>x.productId&&x.qty>0);
+  if(!valid.length){alert("Add at least one product with quantity");return;}
+  setLoading(true);
+  const db=window.DB; const FS=window.FS;
+  const bName=(window._branches||[]).find(b=>b.id===branchId)?.name||"Branch";
+  const staffName=window.CURRENT_USER?.fullName||"Staff";
+  const summaryParts=[];
+  for(const item of valid){
+    const pName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
+    await FS.addDoc(FS.collection(db,"damagedStock"),{branchId,productId:item.productId,quantity:item.qty,reason:item.reason,note:item.note,reportedBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    const sRef=FS.doc(db,"stock",branchId+"_"+item.productId);
+    const sSnap=await FS.getDoc(sRef);
+    if(sSnap.exists()) await FS.updateDoc(sRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
+    summaryParts.push(pName+" x"+item.qty+" ("+item.reason.replace(/_/g," ")+")");
+  }
+  await FS.addDoc(FS.collection(db,"notifications"),{type:"damage",title:"Damage reported — "+bName,description:summaryParts.join(" | ")+" · By "+staffName,branchId,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
+  closeModal("modal-damage");
+  window._dmgItems=[];
+  loadDamage(); loadStock(); setLoading(false);
+  alert("✓ "+valid.length+" damage report(s) saved!");
+};
+
+// ── MULTI-PRODUCT TRANSFER ────────────────────────────────
+window._trItems = [];
+window.initTransferForm = () => { window._trItems = []; addTrProduct(); };
+window.addTrProduct = () => {
+  window._trItems.push({ productId:"", qty:0 });
+  renderTrProducts();
+};
+window.removeTrProduct = (idx) => {
+  window._trItems.splice(idx,1);
+  if(!window._trItems.length) addTrProduct(); else renderTrProducts();
+};
+window.renderTrProducts = () => {
+  const container = document.getElementById("tr-products-container");
+  if(!container) return;
+  container.innerHTML = window._trItems.map((item,idx) => {
+    const pOptsI = (window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("");
+    return `<div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
+      <div style="background:#f9f9f9;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #e5e5e0">
+        <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
+        ${window._trItems.length>1?`<button onclick="removeTrProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
+      </div>
+      <div style="padding:10px 12px">
+        <div class="form-row">
+          <div class="form-field" style="flex:2"><label>Product</label>
+            <select onchange="window._trItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+              <option value="">Select…</option>${pOptsI}
+            </select>
+          </div>
+          <div class="form-field" style="flex:1"><label>Qty (cases)</label>
+            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._trItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+};
+window.saveTransferMulti = async () => {
+  const fromBranch = document.getElementById("inp-tr-from").value;
+  const toBranch   = document.getElementById("inp-tr-to").value;
+  if(!fromBranch||!toBranch){alert("Select From and To branches");return;}
+  if(fromBranch===toBranch){alert("From and To branches must be different");return;}
+  const valid = window._trItems.filter(x=>x.productId&&x.qty>0);
+  if(!valid.length){alert("Add at least one product with quantity");return;}
+  setLoading(true);
+  const db=window.DB; const FS=window.FS;
+  const fromName=(window._branches||[]).find(b=>b.id===fromBranch)?.name||"Branch";
+  const toName=(window._branches||[]).find(b=>b.id===toBranch)?.name||"Branch";
+  const staffName=window.CURRENT_USER?.fullName||"Staff";
+  const summaryParts=[];
+  for(const item of valid){
+    const pName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
+    await FS.addDoc(FS.collection(db,"transfers"),{fromBranchId:fromBranch,toBranchId:toBranch,productId:item.productId,quantity:item.qty,status:"completed",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    await FS.addDoc(FS.collection(db,"stockMovements"),{type:"transfer_out",branchId:fromBranch,productId:item.productId,quantity:-item.qty,reason:"branch_transfer",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    await FS.addDoc(FS.collection(db,"stockMovements"),{type:"transfer_in",branchId:toBranch,productId:item.productId,quantity:item.qty,reason:"branch_transfer",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
+    const fromRef=FS.doc(db,"stock",fromBranch+"_"+item.productId);
+    const fromSnap=await FS.getDoc(fromRef);
+    if(fromSnap.exists()) await FS.updateDoc(fromRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
+    const toRef=FS.doc(db,"stock",toBranch+"_"+item.productId);
+    const toSnap=await FS.getDoc(toRef);
+    if(toSnap.exists()) await FS.updateDoc(toRef,{quantity:FS.increment(item.qty),updatedAt:FS.serverTimestamp()});
+    else await FS.setDoc(toRef,{branchId:toBranch,productId:item.productId,quantity:item.qty,updatedAt:FS.serverTimestamp()});
+    summaryParts.push(pName+" x"+item.qty);
+  }
+  await FS.addDoc(FS.collection(db,"notifications"),{type:"transfer",title:"Stock transfer: "+fromName+" → "+toName,description:summaryParts.join(" | ")+" · By "+staffName,branchId:fromBranch,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
+  closeModal("modal-transfer");
+  window._trItems=[];
+  loadTransfers(); loadStock(); setLoading(false);
+  alert("✓ "+valid.length+" product(s) transferred!");
+};
 </script>
 
 <!-- SET PRODUCT PRICES MODAL (CEO only) -->
@@ -2881,6 +3364,7 @@ document.getElementById("main-app").style.display="none";
     <button class="tab-btn" onclick="switchCustDetailTab(this,'cdt-credit')">Credit Log</button>
   </div>
   <div id="cdt-orders"><div class="empty-state">Loading…</div></div>
+  <div id="cdt-activity" style="display:none"><div class="empty-state">Loading…</div></div>
   <div id="cdt-payments" style="display:none"><div class="empty-state">Loading…</div></div>
   <div id="cdt-credit" style="display:none"><div class="empty-state">Loading…</div></div>
 </div></div>
@@ -3060,5 +3544,17 @@ document.getElementById("main-app").style.display="none";
   <div class="form-field"><label>Reason for voiding (required)</label><textarea id="inp-void-reason" rows="2" placeholder="e.g. Wrong quantity entered, wrong customer selected…"></textarea></div>
   <button class="btn" style="width:100%;background:#E24B4A;color:#fff;border-color:#A32D2D" onclick="confirmVoid()"><i class="ti ti-trash-x"></i> Void This Record</button>
 </div></div>
+<!-- Legacy ID placeholders for backward compatibility -->
+<div style="display:none">
+  <div id="dmg-spill-section"></div>
+  <select id="inp-dmg-product"></select>
+  <input id="inp-dmg-qty" type="number">
+  <select id="inp-dmg-reason"></select>
+  <input id="inp-dmg-note" type="text">
+  <input id="inp-dmg-spill-count" type="number">
+  <input id="inp-dmg-missing-count" type="number">
+  <input id="inp-dmg-pkg" type="checkbox">
+  <select id="inp-tr-product"></select>
+  <input id="inp-tr-qty" type="number">
+</div>
 </body>
-</html>
