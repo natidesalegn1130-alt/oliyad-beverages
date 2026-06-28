@@ -273,10 +273,13 @@ window.saveAdjustment = async () => {
         }
       }
       const expiryUpdate = (type === "add" && newExpiry) ? { earliestExpiry } : {};
-      if (type === "set") await FS.updateDoc(ref, { quantity: netQty, updatedAt: FS.serverTimestamp(), ...expiryUpdate });
-      else { const delta = type === "add" ? netQty : -netQty; await FS.updateDoc(ref, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp(), ...expiryUpdate }); }
+      const currentQty = existingData.quantity || 0;
+      const safeQty = type === "remove" ? Math.min(netQty, currentQty) : netQty;
+      if (type === "set") await FS.updateDoc(ref, { quantity: safeQty, updatedAt: FS.serverTimestamp(), ...expiryUpdate });
+      else { const delta = type === "add" ? safeQty : -safeQty; await FS.updateDoc(ref, { quantity: FS.increment(delta), updatedAt: FS.serverTimestamp(), ...expiryUpdate }); }
     } else {
-      await FS.setDoc(ref, { branchId, productId: item.productId, quantity: netQty, earliestExpiry: newExpiry, updatedAt: FS.serverTimestamp() });
+      const safeQty = type === "remove" ? 0 : netQty;
+      await FS.setDoc(ref, { branchId, productId: item.productId, quantity: safeQty, earliestExpiry: newExpiry, updatedAt: FS.serverTimestamp() });
     }
 
     // Save stock movement
@@ -523,6 +526,17 @@ window.saveOrder = async () => {
       customerId, action: "given", amount: creditGiven,
       note: "Credit from order", orderId: orderRef.id,
       doneBy: window.CURRENT_USER.uid, branchId,
+      createdAt: FS.serverTimestamp()
+    });
+  }
+  // If partial payment — also log the cash paid NOW as a payment record
+  if (!isWalkin && payment === "partial" && paidAmount > 0) {
+    await FS.addDoc(FS.collection(db, "payments"), {
+      orderId: orderRef.id, customerId, branchId,
+      amount: paidAmount,
+      method: "cash",
+      note: "Partial payment on order",
+      receivedBy: window.CURRENT_USER.uid,
       createdAt: FS.serverTimestamp()
     });
   }
@@ -1667,8 +1681,8 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
 
 <div class="modal-bg" id="modal-payment"><div class="modal">
   <div class="modal-title">Record Payment <button onclick="closeModal('modal-payment')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
+  <div class="form-field"><label>Branch</label><select id="inp-pay-branch" onchange="onPayBranchChange()"><option value="">Select branch…</option></select></div>
   <div class="form-field"><label>Customer</label><select id="inp-pay-customer"><option value="">Select…</option></select></div>
-  <div class="form-field"><label>Branch</label><select id="inp-pay-branch"><option value="">Select branch…</option></select></div>
   <div class="form-field"><label>Order ID (optional)</label><input id="inp-pay-order" type="text" placeholder="Leave blank for general payment"></div>
   <div class="form-row">
     <div class="form-field"><label>Amount (ETB)</label><input id="inp-pay-amount" type="number" placeholder="0"></div>
@@ -2197,7 +2211,7 @@ function renderOrders(list){
   </div>`;
 
   if(!filtered.length){ document.getElementById("tab-orders-list").innerHTML=filterBar+'<div class="empty-state">No orders to show.</div>'; return; }
-  document.getElementById("tab-orders-list").innerHTML=filterBar+`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:28%"><col style="width:16%"><col style="width:14%"><col style="width:10%"><col style="width:14%"></colgroup><thead><tr><th>Customer</th><th>Products</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${filtered.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); const isVoid=o.isVoided; const custName=cMap[o.customerId]||"—"; const summary="<b>"+custName+"</b><br>ETB "+(o.totalAmount||0).toLocaleString()+" · "+(o.paymentStatus||"")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); const partialNote=(o.paymentStatus==="partial"&&!isVoid)?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${(o.paidAmount||0).toLocaleString()} paid)</div>`:""; return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td><b>${custName}</b></td><td style="font-size:11px;color:#555">${o.itemsSummary||"—"}</td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${isVoid?"voided":o.paymentStatus}</span>${partialNote}</td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('order','${o.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this order"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
+  document.getElementById("tab-orders-list").innerHTML=filterBar+`<div class="card"><table class="tbl"><colgroup><col style="width:18%"><col style="width:28%"><col style="width:16%"><col style="width:14%"><col style="width:10%"><col style="width:14%"></colgroup><thead><tr><th>Customer</th><th>Products</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${filtered.map(o=>{ const d=o.createdAt&&o.createdAt.toDate?o.createdAt.toDate():new Date(); const isVoid=o.isVoided; const custName=cMap[o.customerId]||"—"; const summary="<b>"+custName+"</b><br>ETB "+(o.totalAmount||0).toLocaleString()+" · "+(o.paymentStatus||"")+"<br>"+d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); const summaryEsc=summary.replace(/"/g,"&quot;"); const partialNote=(o.paymentStatus==="partial"&&!isVoid)?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${fmtNum(o.paidAmount)} paid)</div>`:""; return `<tr style="${isVoid?'opacity:.5;text-decoration:line-through':''}"><td><b>${custName}</b><div style="font-size:10px;color:#888;margin-top:1px">${(window._branches||[]).find(b=>b.id===o.branchId)?.name||""}</div></td><td style="font-size:11px;color:#555">${o.itemsSummary||"—"}</td><td>ETB ${fmtNum(o.totalAmount)}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${isVoid?"voided":o.paymentStatus}</span>${partialNote}</td><td>${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})}</td><td>${(!isVoid && canVoid())?`<button onclick="openVoidModal('order','${o.id}','${summaryEsc}')" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:16px" title="Void this order"><i class="ti ti-trash-x"></i></button>`:""}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 
 window.setOrdersFilter = (mode) => {
@@ -2657,6 +2671,7 @@ window.loadPricesList = async () => {
 // ══════════════════════════════════════════════════════════
 // TIMESTAMP HELPER
 // ══════════════════════════════════════════════════════════
+function fmtNum(n){ if(n===null||n===undefined||isNaN(n)) return "0"; return Math.round(Number(n)).toLocaleString("en-US"); }
 function fmtTs(ts) {
   if (!ts) return "—";
   const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -2749,7 +2764,7 @@ window.loadBranchDetailOrders = async (branchId) => {
   document.getElementById("bdt-orders").innerHTML = list.length ? `<table class="tbl">
     <colgroup><col style="width:34%"><col style="width:28%"><col style="width:18%"><col style="width:20%"></colgroup>
     <thead><tr><th>Customer</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
-    <tbody>${list.map(o => `<tr><td>${cMap[o.customerId]||"Walk-in"}</td><td>ETB ${(o.totalAmount||0).toLocaleString()}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span>${o.paymentStatus==="partial"?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${(o.paidAmount||0).toLocaleString()} paid)</div>`:""}</td><td style="font-size:11px">${fmtTs(o.createdAt)}</td></tr>`).join("")}</tbody>
+    <tbody>${list.map(o => `<tr><td>${cMap[o.customerId]||"Walk-in"}</td><td>ETB ${fmtNum(o.totalAmount)}</td><td><span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span>${o.paymentStatus==="partial"?`<div style="font-size:10px;color:#666;margin-top:2px">(ETB ${fmtNum(o.paidAmount)} paid)</div>`:""}</td><td style="font-size:11px">${fmtTs(o.createdAt)}</td></tr>`).join("")}</tbody>
   </table>` : '<div class="empty-state">No orders yet</div>';
 };
 
@@ -2797,7 +2812,7 @@ window.loadCustDetailOrders = async (customerId) => {
   document.getElementById("cdt-orders").innerHTML = list.length ? list.map(o => `
     <div style="padding:8px 0;border-bottom:0.5px solid #e5e5e0">
       <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-        <span style="font-weight:600;font-size:13px">ETB ${(o.totalAmount||0).toLocaleString()}</span>
+        <span style="font-weight:600;font-size:13px">ETB ${fmtNum(o.totalAmount)}</span>
         <span class="badge ${sb[o.paymentStatus]||"bgr"}">${o.paymentStatus}</span>
       </div>
       <div style="font-size:11px;color:#666">${bMap[o.branchId]||"—"} · ${o.paymentMethod||""} · ${o.itemCount||1} product(s)</div>
@@ -2856,7 +2871,7 @@ window.loadCustDetailActivity = async (customerId) => {
   const el=document.getElementById("cdt-activity"); if(!el) return;
   try {
   if(!items.length){el.innerHTML='<div class="empty-state">No account activity yet</div>'; return;}
-  el.innerHTML=items.map(item=>`<div style="padding:8px 0;border-bottom:0.5px solid #f0f0f0;display:flex;align-items:flex-start;gap:10px"><div style="width:32px;height:32px;border-radius:50%;background:${item.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:${item.color};flex-shrink:0">${item.sign}</div><div style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:13px;font-weight:600">${item.label}</span><span style="font-size:14px;font-weight:700;color:${item.color}">${item.sign}ETB ${item.amount.toLocaleString()}</span></div>${item.note?`<div style="font-size:11px;color:#666">${item.note}</div>`:""}<div style="font-size:11px;color:#999">By: ${item.by} · ${fmtTs(item.date)}</div></div></div>`).join("");
+  el.innerHTML=items.map(item=>`<div style="padding:8px 0;border-bottom:0.5px solid #f0f0f0;display:flex;align-items:flex-start;gap:10px"><div style="width:32px;height:32px;border-radius:50%;background:${item.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:${item.color};flex-shrink:0">${item.sign}</div><div style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:13px;font-weight:600">${item.label}</span><span style="font-size:14px;font-weight:700;color:${item.color}">${item.sign}ETB ${fmtNum(item.amount)}</span></div>${item.note?`<div style="font-size:11px;color:#666">${item.note}</div>`:""}<div style="font-size:11px;color:#999">By: ${item.by} · ${fmtTs(item.date)}</div></div></div>`).join("");
   } catch(err) { el.innerHTML='<div class="empty-state" style="color:#E24B4A">Error loading activity: '+err.message+'</div>'; }
 };
 
@@ -2892,6 +2907,12 @@ window.loadCustDetailCreditLog = async (customerId) => {
 // 6. CREDIT MANAGEMENT
 // ══════════════════════════════════════════════════════════
 window.openCreditMgmt = () => {
+  // Populate branch filter
+  const bSel = document.getElementById("inp-credit-branch");
+  if (bSel) {
+    bSel.innerHTML = '<option value="">All branches</option>';
+    (window._branches||[]).forEach(b=>{ const o=document.createElement("option"); o.value=b.id; o.textContent=b.name; bSel.appendChild(o); });
+  }
   openModal("modal-credit-mgmt");
   const el = document.getElementById("inp-credit-customer");
   el.innerHTML = '<option value="">Select customer…</option>';
@@ -3006,6 +3027,28 @@ window.applyPaymentFIFO = async (customerId, amount) => {
     await FS.updateDoc(FS.doc(db, "orders", o.id), { paidAmount: newPaid, paymentStatus: newStatus, updatedAt: FS.serverTimestamp() });
     remaining -= applyAmt;
   }
+};
+
+// #4: Branch-aware payment customer filter
+window.onPayBranchChange = () => {
+  const branchId = document.getElementById("inp-pay-branch").value;
+  const sel = document.getElementById("inp-pay-customer");
+  sel.innerHTML = '<option value="">Select customer…</option>';
+  const list = branchId
+    ? (window._customers||[]).filter(c=>c.branchId===branchId&&(c.outstandingBalance||0)>0)
+    : (window._customers||[]).filter(c=>(c.outstandingBalance||0)>0);
+  list.forEach(cu=>{ const o=document.createElement("option"); o.value=cu.id; o.textContent=cu.name+" (ETB "+fmtNum(cu.outstandingBalance)+" owed)"; sel.appendChild(o); });
+};
+
+// #4: Branch-aware credit management filter
+window.onCreditBranchChange = () => {
+  const branchId = document.getElementById("inp-credit-branch").value;
+  const sel = document.getElementById("inp-credit-customer");
+  sel.innerHTML = '<option value="">Select customer…</option>';
+  const list = branchId
+    ? (window._customers||[]).filter(c=>c.branchId===branchId&&(c.outstandingBalance||0)>0)
+    : (window._customers||[]).filter(c=>(c.outstandingBalance||0)>0);
+  list.forEach(cu=>{ const o=document.createElement("option"); o.value=cu.id; o.textContent=cu.name+" — ETB "+fmtNum(cu.outstandingBalance); sel.appendChild(o); });
 };
 
 window.savePayment = async () => {
@@ -3262,11 +3305,29 @@ window.removeTrProduct = (idx) => {
   window._trItems.splice(idx,1);
   if(!window._trItems.length) addTrProduct(); else renderTrProducts();
 };
+window._trBranchStock = {}; // productId -> qty for selected from-branch
+
+window.onTrFromBranchChange = async () => {
+  const fromBranch = document.getElementById("inp-tr-from").value;
+  window._trBranchStock = {};
+  if (!fromBranch) { renderTrProducts(); return; }
+  const db=window.DB; const FS=window.FS;
+  const snaps = await FS.getDocs(FS.query(FS.collection(db,"stock"), FS.where("branchId","==",fromBranch)));
+  snaps.forEach(d=>{ const data=d.data(); if((data.quantity||0)>0) window._trBranchStock[data.productId]=data.quantity; });
+  renderTrProducts();
+};
+
 window.renderTrProducts = () => {
   const container = document.getElementById("tr-products-container");
   if(!container) return;
+  const stockMap = window._trBranchStock || {};
   container.innerHTML = window._trItems.map((item,idx) => {
-    const pOptsI = (window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("");
+    // Only show products that have stock in the from-branch
+    const availProds = Object.keys(stockMap).length > 0
+      ? (window._products||[]).filter(p => stockMap[p.id] > 0)
+      : (window._products||[]);
+    const pOptsI = availProds.map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name} (${(stockMap[p.id]||0)} in stock)</option>`).join("");
+    const maxQty = item.productId && stockMap[item.productId] ? stockMap[item.productId] : 9999;
     return `<div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
       <div style="background:#f9f9f9;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #e5e5e0">
         <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
@@ -3275,12 +3336,12 @@ window.renderTrProducts = () => {
       <div style="padding:10px 12px">
         <div class="form-row">
           <div class="form-field" style="flex:2"><label>Product</label>
-            <select onchange="window._trItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
+            <select onchange="window._trItems[${idx}].productId=this.value;renderTrProducts()" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
               <option value="">Select…</option>${pOptsI}
             </select>
           </div>
-          <div class="form-field" style="flex:1"><label>Qty (cases)</label>
-            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._trItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
+          <div class="form-field" style="flex:1"><label>Qty (max: ${maxQty})</label>
+            <input type="number" placeholder="0" min="0" max="${maxQty}" value="${item.qty||""}" oninput="window._trItems[${idx}].qty=Math.min(parseInt(this.value)||0,${maxQty})" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
           </div>
         </div>
       </div>
@@ -3375,6 +3436,7 @@ window.saveTransferMulti = async () => {
 <div class="modal-bg" id="modal-credit-mgmt"><div class="modal">
   <div class="modal-title">Manage Customer Credit <button onclick="closeModal('modal-credit-mgmt')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
   <div style="font-size:12px;color:#666;margin-bottom:10px">CEO can adjust any customer credit. Branch managers can only adjust their branch customers after payment is received.</div>
+  <div class="form-field"><label>Branch <span style="color:#999;font-weight:400">(filter)</span></label><select id="inp-credit-branch" onchange="onCreditBranchChange()"><option value="">All branches</option></select></div>
   <div class="form-field"><label>Customer</label><select id="inp-credit-customer"><option value="">Select…</option></select></div>
   <div id="credit-current-balance" style="background:#f5f5f0;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;display:none">
     <div style="display:flex;justify-content:space-between"><span style="color:#666">Outstanding Balance</span><span id="credit-bal-val" style="font-weight:700;color:#E24B4A">ETB 0</span></div>
