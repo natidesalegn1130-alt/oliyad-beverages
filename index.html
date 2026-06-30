@@ -1437,7 +1437,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
 <div class="modal-bg" id="modal-transfer"><div class="modal" style="max-width:420px;max-height:90vh;overflow-y:auto">
   <div class="modal-title">Stock Transfer <button onclick="closeModal('modal-transfer')" style="background:none;border:none;cursor:pointer"><i class="ti ti-x"></i></button></div>
   <div class="form-row">
-    <div class="form-field"><label>From Branch</label><select id="inp-tr-from"><option value="">Select…</option></select></div>
+    <div class="form-field"><label>From Branch</label><select id="inp-tr-from" onchange="onTrFromBranchChange()"><option value="">Select…</option></select></div>
     <div class="form-field"><label>To Branch</label><select id="inp-tr-to"><option value="">Select…</option></select></div>
   </div>
   <div style="font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;margin-top:4px">Products to Transfer</div>
