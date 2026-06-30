@@ -862,11 +862,36 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#1a
 .form-field label{font-size:12px;color:#666;display:block;margin-bottom:4px;font-weight:500}
 .form-field input,.form-field select,.form-field textarea{width:100%;padding:8px 10px;border:0.5px solid #ccc;border-radius:8px;background:#fff;color:#1a1a18;font-size:14px;font-family:inherit}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.login-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:#f5f5f0}
-.login-logo{font-size:28px;font-weight:900;color:var(--brand);margin-bottom:4px}
-.login-sub{font-size:13px;color:#666;margin-bottom:24px;text-align:center}
-.login-card{background:#fff;border-radius:12px;border:0.5px solid #e5e5e0;padding:22px;width:100%;max-width:340px}
-.login-btn{width:100%;padding:11px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px}
+.login-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:#0a0a0a;background-size:cover;background-position:center;position:relative;overflow:hidden}
+.login-wrap::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,rgba(0,0,0,.35) 100%);z-index:0}
+.login-logo{font-size:28px;font-weight:900;color:#fff;margin-bottom:4px;position:relative;z-index:1;text-shadow:0 2px 12px rgba(0,0,0,.4)}
+.login-sub{font-size:12px;color:rgba(255,255,255,.75);margin-bottom:24px;text-align:center;position:relative;z-index:1;text-shadow:0 1px 6px rgba(0,0,0,.4)}
+.login-card{
+  background:rgba(255,255,255,.12);
+  backdrop-filter:blur(20px) saturate(150%);
+  -webkit-backdrop-filter:blur(20px) saturate(150%);
+  border-radius:20px;
+  border:1px solid rgba(255,255,255,.25);
+  box-shadow:0 8px 32px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.3);
+  padding:28px 26px;
+  width:100%;max-width:340px;
+  position:relative;z-index:1;
+}
+.login-card .form-field label{color:rgba(255,255,255,.85)!important}
+.login-card input{
+  background:rgba(255,255,255,.1)!important;
+  border:none!important;
+  border-bottom:1px solid rgba(255,255,255,.4)!important;
+  border-radius:0!important;
+  color:#fff!important;
+  padding:10px 4px!important;
+}
+.login-card input::placeholder{color:rgba(255,255,255,.5)}
+.login-card input:focus{border-bottom-color:#fff!important;outline:none}
+.login-title{font-size:22px;font-weight:700;color:#fff;text-align:center;margin-bottom:22px;letter-spacing:1px;text-shadow:0 2px 8px rgba(0,0,0,.3)}
+.login-btn{width:100%;padding:13px;background:#2DA8E8;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:18px;letter-spacing:1.5px;text-transform:uppercase;box-shadow:0 4px 14px rgba(45,168,232,.4);transition:transform .15s,box-shadow .15s}
+.login-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(45,168,232,.5)}
+.login-card .error-text{color:#FFB4B4!important}
 .error-text{color:#E24B4A;font-size:12px;margin-top:6px;text-align:center;min-height:18px}
 .loader-overlay{display:none;position:fixed;inset:0;background:rgba(255,255,255,.6);z-index:999;align-items:center;justify-content:center}
 .loader-overlay.show{display:flex}
@@ -935,11 +960,7 @@ body{background:var(--t-bg)!important;color:var(--t-text)!important}
 .notif-desc{color:var(--t-text2)!important}
 .empty-state{color:var(--t-text3)!important}
 .credit-bar{background:var(--t-stat-bg)!important}
-.login-wrap{background:var(--t-bg)!important}
-.login-card{background:var(--t-surface)!important;border-color:var(--t-border)!important}
-.login-logo{color:var(--t-brand)!important}
-.login-sub{color:var(--t-text2)!important}
-.login-btn{background:var(--t-brand)!important;border-color:var(--t-brand-d)!important}
+/* Login screen keeps its glass/photo design regardless of theme - overrides removed */
 .branch-stat{background:var(--t-stat-bg)!important}
 .branch-stat-val{color:var(--t-brand)!important}
 .calc-field input,.calc-field select{background:var(--t-surface)!important;color:var(--t-text)!important;border-color:var(--t-border)!important}
@@ -1029,7 +1050,7 @@ body.theme-amber{--t-brand:#854F0B;--t-brand-d:#633806;--t-brand-l:#FAEEDA;--t-t
 body.theme-purple{--t-brand:#3C3489;--t-brand-d:#26215C;--t-brand-l:#EEEDFE;--t-topbar-bg:#3C3489;--t-topbar-text:#fff;--t-topbar-sub:#CECBF6;--t-avatar-bg:#CECBF6;--t-avatar-color:#26215C;--t-nav-active:#534AB7;--t-accent:#EEEDFE;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
 body.theme-auto{--t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;--t-topbar-bg:#1558B0;--t-topbar-text:#fff;--t-topbar-sub:#B5D4F4;--t-avatar-bg:#B5D4F4;--t-avatar-color:#0C447C;--t-nav-active:#1558B0;--t-accent:#E6F1FB;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
 @media(prefers-color-scheme:dark){body.theme-auto{--t-brand:#378ADD;--t-topbar-bg:#111;--t-topbar-text:#fff;--t-topbar-sub:#555;--t-avatar-bg:#185FA5;--t-avatar-color:#B5D4F4;--t-nav-active:#378ADD;color-scheme:dark;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}}
-body.theme-dark,.theme-dark .card,.theme-dark .modal,.theme-dark .bottom-nav,.theme-dark .topbar,.theme-dark .branch-card,.theme-dark .login-card{background-color:#111 !important;border-color:#333 !important;color:#eee !important}
+body.theme-dark,.theme-dark .card,.theme-dark .modal,.theme-dark .bottom-nav,.theme-dark .topbar,.theme-dark .branch-card{background-color:#111 !important;border-color:#333 !important;color:#eee !important}
 body.theme-dark .stat-card,.theme-dark .tab-bar,.theme-dark .calc-field input,.theme-dark .calc-field select,.theme-dark .form-field input,.theme-dark .form-field select,.theme-dark .form-field textarea{background:#1e1e1e !important;border-color:#333 !important;color:#eee !important}
 body.theme-dark .stat-label,.theme-dark .card-title,.theme-dark .notif-desc,.theme-dark .branch-meta,.theme-dark .notif-time,.theme-dark .tab-btn{color:#888 !important}
 body.theme-dark .content{background:#0d0d0d !important}
@@ -1046,8 +1067,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
 .user-avatar{background:var(--t-avatar-bg,#B5D4F4) !important;color:var(--t-avatar-color,#0C447C) !important}
 .nav-item.active{color:var(--t-nav-active,#1558B0) !important}
 .btn-primary{background:var(--t-brand,#1558B0) !important;border-color:var(--t-brand-d,#0C447C) !important}
-.login-btn{background:var(--t-brand,#1558B0) !important}
-.login-logo{color:var(--t-brand,#1558B0) !important}
+/* login-btn and login-logo keep their fixed glass-theme styling */
 .stat-value{color:var(--color-text-primary)}
 .branch-stat-val{color:var(--t-brand,#1558B0) !important}
 .badge.bb{background:var(--t-accent,#E6F1FB) !important;color:var(--t-brand,#1558B0) !important}
@@ -1060,6 +1080,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
   <div class="login-logo"><svg width="1em" height="1em" viewBox="-16 -16 32 32" style="display:inline-block;vertical-align:-3px;margin-right:6px" aria-hidden="true"><circle r="14" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="-4.5" cy="-4.5" r="7.5" fill="currentColor" opacity="0.55"/></svg> Oliyad Beverages</div>
   <div class="login-sub">Wholesale Management System</div>
   <div class="login-card">
+    <div class="login-title">LOGIN</div>
     <div class="form-field"><label>Email</label><input id="li-email" type="email" placeholder="your@email.com"></div>
     <div class="form-field"><label>Password</label><input id="li-pass" type="password" placeholder="Password"></div>
     <div id="li-error" class="error-text"></div>
@@ -1493,7 +1514,21 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
 
 <script>
 function setLoading(v){ document.getElementById("loader").classList.toggle("show",v); }
-function showLogin(){ document.getElementById("login-screen").style.display="flex"; document.getElementById("main-app").style.display="none"; }
+const LOGIN_BG_FALLBACK = "linear-gradient(135deg,#1e3c5a 0%,#2d5d7c 35%,#4a8b9e 65%,#7eb8a8 100%)";
+function setRandomLoginBackground(){
+  const wrap = document.getElementById("login-screen");
+  if(!wrap) return;
+  // Set a nice gradient immediately so it never looks broken
+  wrap.style.backgroundImage = LOGIN_BG_FALLBACK;
+  // Try to load a real random landscape photo on top; if it loads, swap it in
+  const seed = Math.floor(Math.random()*10000);
+  const url = "https://picsum.photos/seed/" + seed + "/1600/1000";
+  const img = new Image();
+  img.onload = () => { wrap.style.backgroundImage = "url('" + url + "')"; };
+  img.onerror = () => { /* keep gradient fallback */ };
+  img.src = url;
+}
+function showLogin(){ document.getElementById("login-screen").style.display="flex"; document.getElementById("main-app").style.display="none"; setRandomLoginBackground(); }
 function showApp(){
   const u=window.CURRENT_USER;
   document.getElementById("login-screen").style.display="none";
