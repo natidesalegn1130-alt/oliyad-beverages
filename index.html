@@ -672,161 +672,18 @@ window.saveExpense = async () => {
 
 // ── MULTI-PRODUCT DAMAGE REPORT ──────────────────────────
 window._dmgItems = [];
-window.initDamageForm = () => {
-  window._dmgItems = [];
-  addDmgProduct();
-};
-window.addDmgProduct = () => {
-  window._dmgItems.push({ productId:"", qty:0, reason:"transit_damage", note:"" });
-  renderDmgProducts();
-};
 window.removeDmgProduct = (idx) => {
   window._dmgItems.splice(idx,1);
   if(!window._dmgItems.length) addDmgProduct();
   else renderDmgProducts();
 };
-window.renderDmgProducts = () => {
-  const container = document.getElementById("dmg-products-container");
-  if(!container) return;
-  const pOpts = (window._products||[]).map(p=>`<option value="${p.id}" ${window._dmgItems[0]&&window._dmgItems[0].productId===p.id?"":""}>${p.name}</option>`).join("");
-  container.innerHTML = window._dmgItems.map((item,idx)=>`
-    <div style="border:0.5px solid #f0d0d0;border-radius:10px;margin-bottom:10px;overflow:hidden">
-      <div style="background:#fff8f8;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0d0d0">
-        <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
-        ${window._dmgItems.length>1?`<button onclick="removeDmgProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
-      </div>
-      <div style="padding:10px 12px">
-        <div class="form-row">
-          <div class="form-field" style="flex:2">
-            <label>Product</label>
-            <select onchange="window._dmgItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-              <option value="">Select product…</option>
-              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
-            </select>
-          </div>
-          <div class="form-field" style="flex:1">
-            <label>Cases</label>
-            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._dmgItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
-          </div>
-        </div>
-        <div class="form-field">
-          <label>Reason</label>
-          <select onchange="window._dmgItems[${idx}].reason=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-            <option value="spilling" ${item.reason==="spilling"?"selected":""}>Spilling (leaking)</option>
-            <option value="missing_items" ${item.reason==="missing_items"?"selected":""}>Missing items</option>
-            <option value="packaging_damaged" ${item.reason==="packaging_damaged"?"selected":""}>Packaging damaged</option>
-            <option value="transit_damage" ${(!item.reason||item.reason==="transit_damage")?"selected":""}>Transit damage</option>
-            <option value="expired" ${item.reason==="expired"?"selected":""}>Expired</option>
-            <option value="theft" ${item.reason==="theft"?"selected":""}>Theft</option>
-            <option value="other" ${item.reason==="other"?"selected":""}>Other</option>
-          </select>
-        </div>
-        <div class="form-field">
-          <label>Notes</label>
-          <input type="text" placeholder="Optional notes…" value="${item.note||""}" oninput="window._dmgItems[${idx}].note=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-        </div>
-      </div>
-    </div>`).join("");
-};
-window.saveDamageMulti = async () => {
-  const branchId = document.getElementById("inp-dmg-branch").value;
-  if(!branchId){alert("Select a branch");return;}
-  const valid = window._dmgItems.filter(x=>x.productId&&x.qty>0);
-  if(!valid.length){alert("Add at least one product with quantity");return;}
-  setLoading(true);
-  const db=window.DB; const FS=window.FS;
-  const branchName=(window._branches||[]).find(b=>b.id===branchId)?.name||"Branch";
-  const staffName=window.CURRENT_USER?.fullName||"Staff";
-  const summaryParts=[];
-  for(const item of valid){
-    const prodName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
-    await FS.addDoc(FS.collection(db,"damagedStock"),{branchId,productId:item.productId,quantity:item.qty,reason:item.reason,note:item.note,reportedBy:window.CURRENT_USER?.uid,createdAt:FS.serverTimestamp()});
-    const sid=branchId+"_"+item.productId;
-    const sRef=FS.doc(db,"stock",sid);
-    const sSnap=await FS.getDoc(sRef);
-    if(sSnap.exists()) await FS.updateDoc(sRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
-    summaryParts.push(prodName+" ×"+item.qty+" ("+item.reason.replace(/_/g," ")+")");
-  }
-  await FS.addDoc(FS.collection(db,"notifications"),{type:"damage",title:"Damage reported — "+branchName,description:summaryParts.join(" | ")+" · By "+staffName,branchId,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
-  closeModal("modal-damage");
-  window._dmgItems=[];
-  loadDamage(); loadStock();
-  setLoading(false);
-  alert("✓ "+valid.length+" damage report(s) submitted!");
-};
-
 // ── MULTI-PRODUCT TRANSFER ────────────────────────────────
 window._trItems = [];
-window.initTransferForm = () => {
-  window._trItems = [];
-  addTrProduct();
-};
-window.addTrProduct = () => {
-  window._trItems.push({ productId:"", qty:0 });
-  renderTrProducts();
-};
 window.removeTrProduct = (idx) => {
   window._trItems.splice(idx,1);
   if(!window._trItems.length) addTrProduct();
   else renderTrProducts();
 };
-window.renderTrProducts = () => {
-  const container = document.getElementById("tr-products-container");
-  if(!container) return;
-  container.innerHTML = window._trItems.map((item,idx)=>`
-    <div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
-      <div style="background:#f9f9f9;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #e5e5e0">
-        <span style="font-size:12px;font-weight:600;color:#666">Product ${idx+1}</span>
-        ${window._trItems.length>1?`<button onclick="removeTrProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
-      </div>
-      <div style="padding:10px 12px">
-        <div class="form-row">
-          <div class="form-field" style="flex:2">
-            <label>Product</label>
-            <select onchange="window._trItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-              <option value="">Select product…</option>
-              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
-            </select>
-          </div>
-          <div class="form-field" style="flex:1">
-            <label>Qty (cases)</label>
-            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._trItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
-          </div>
-        </div>
-      </div>
-    </div>`).join("");
-};
-window.saveTransferMulti = async () => {
-  const fromBranch=document.getElementById("inp-tr-from").value;
-  const toBranch=document.getElementById("inp-tr-to").value;
-  if(!fromBranch||!toBranch){alert("Select both branches");return;}
-  if(fromBranch===toBranch){alert("From and To branches must be different");return;}
-  const valid=window._trItems.filter(x=>x.productId&&x.qty>0);
-  if(!valid.length){alert("Add at least one product with quantity");return;}
-  setLoading(true);
-  const db=window.DB; const FS=window.FS;
-  const fromName=(window._branches||[]).find(b=>b.id===fromBranch)?.name||"Branch";
-  const toName=(window._branches||[]).find(b=>b.id===toBranch)?.name||"Branch";
-  const staffName=window.CURRENT_USER?.fullName||"Staff";
-  const summaryParts=[];
-  for(const item of valid){
-    const prodName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
-    await FS.addDoc(FS.collection(db,"transfers"),{fromBranchId:fromBranch,toBranchId:toBranch,productId:item.productId,quantity:item.qty,status:"completed",createdBy:window.CURRENT_USER?.uid,createdAt:FS.serverTimestamp()});
-    await FS.updateDoc(FS.doc(db,"stock",fromBranch+"_"+item.productId),{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
-    const toRef=FS.doc(db,"stock",toBranch+"_"+item.productId);
-    const toSnap=await FS.getDoc(toRef);
-    if(toSnap.exists()) await FS.updateDoc(toRef,{quantity:FS.increment(item.qty),updatedAt:FS.serverTimestamp()});
-    else await FS.setDoc(toRef,{branchId:toBranch,productId:item.productId,quantity:item.qty,updatedAt:FS.serverTimestamp()});
-    summaryParts.push(prodName+" ×"+item.qty);
-  }
-  await FS.addDoc(FS.collection(db,"notifications"),{type:"transfer",title:"Stock transfer: "+fromName+" → "+toName,description:summaryParts.join(" | ")+" · By "+staffName,branchId:fromBranch,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
-  closeModal("modal-transfer");
-  window._trItems=[];
-  loadTransfers(); loadStock();
-  setLoading(false);
-  alert("✓ "+valid.length+" product(s) transferred!");
-};
-
 window.saveTransfer = async () => { saveTransferMulti(); };
 
 window.saveTransfer = async () => {
@@ -862,166 +719,18 @@ window.saveTransfer = async () => {
 
 // ── MULTI-PRODUCT DAMAGE REPORT ─────────────────────────
 window._dmgItems = [];
-window.initDamageForm = () => {
-  window._dmgItems = [];
-  addDmgProduct();
-};
-window.addDmgProduct = () => {
-  window._dmgItems.push({ productId:"", qty:0, reason:"spilling", spill:0, missing:0, pkg:false, note:"" });
-  renderDmgProducts();
-};
 window.removeDmgProduct = (idx) => {
   window._dmgItems.splice(idx,1);
   if(!window._dmgItems.length) addDmgProduct();
   else renderDmgProducts();
 };
-window.renderDmgProducts = () => {
-  const container = document.getElementById("dmg-products-container");
-  if(!container) return;
-  const pOpts = (window._products||[]).map(p=>`<option value="${p.id}" ${window._dmgItems[0]&&window._dmgItems[0].productId===p.id?"":""}>${p.name}</option>`).join("");
-  container.innerHTML = window._dmgItems.map((item,idx)=>`
-    <div style="border:0.5px solid #f0d0d0;border-radius:10px;margin-bottom:10px;overflow:hidden">
-      <div style="background:#fff8f8;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0d0d0">
-        <span style="font-size:12px;font-weight:600;color:#E24B4A">Product ${idx+1}</span>
-        ${window._dmgItems.length>1?`<button onclick="removeDmgProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
-      </div>
-      <div style="padding:10px 12px">
-        <div class="form-row">
-          <div class="form-field" style="flex:2"><label>Product</label>
-            <select onchange="window._dmgItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-              <option value="">Select product…</option>
-              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
-            </select>
-          </div>
-          <div class="form-field" style="flex:1"><label>Cases Lost</label>
-            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._dmgItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
-          </div>
-        </div>
-        <div class="form-field"><label>Reason</label>
-          <select onchange="window._dmgItems[${idx}].reason=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-            <option value="spilling" ${item.reason==="spilling"?"selected":""}>Spilling (leaking)</option>
-            <option value="missing_items" ${item.reason==="missing_items"?"selected":""}>Missing items</option>
-            <option value="packaging_damaged" ${item.reason==="packaging_damaged"?"selected":""}>Packaging damaged</option>
-            <option value="spilling_and_missing" ${item.reason==="spilling_and_missing"?"selected":""}>Spilling + Missing</option>
-            <option value="expired" ${item.reason==="expired"?"selected":""}>Expired</option>
-            <option value="lost" ${item.reason==="lost"?"selected":""}>Lost</option>
-            <option value="theft" ${item.reason==="theft"?"selected":""}>Theft</option>
-            <option value="other" ${item.reason==="other"?"selected":""}>Other</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <div class="form-field"><label>Spilling/case</label><input type="number" placeholder="0" min="0" value="${item.spill||""}" oninput="window._dmgItems[${idx}].spill=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
-          <div class="form-field"><label>Missing/case</label><input type="number" placeholder="0" min="0" value="${item.missing||""}" oninput="window._dmgItems[${idx}].missing=parseInt(this.value)||0" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:13px"></div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;background:#f9f9f9;border-radius:6px;margin-bottom:6px">
-          <input type="checkbox" id="dmg-pkg-${idx}" ${item.pkg?"checked":""} onchange="window._dmgItems[${idx}].pkg=this.checked" style="width:14px;height:14px">
-          <label for="dmg-pkg-${idx}" style="font-size:12px;cursor:pointer">Packaging damaged</label>
-        </div>
-        <div class="form-field"><label>Notes</label><textarea rows="2" placeholder="Describe damage…" oninput="window._dmgItems[${idx}].note=this.value" style="width:100%;padding:7px;border:0.5px solid #ddd;border-radius:7px;font-size:12px;resize:none">${item.note||""}</textarea></div>
-      </div>
-    </div>`).join("");
-};
-window.saveDamageMulti = async () => {
-  const branchId = document.getElementById("inp-dmg-branch").value;
-  if(!branchId){alert("Select a branch");return;}
-  const valid = window._dmgItems.filter(i=>i.productId&&i.qty>0);
-  if(!valid.length){alert("Add at least one product with quantity");return;}
-  setLoading(true);
-  const db=window.DB;const FS=window.FS;
-  const bName=(window._branches||[]).find(b=>b.id===branchId)?.name||"Branch";
-  const staffName=window.CURRENT_USER?.fullName||"Staff";
-  const summaryParts=[];
-  for(const item of valid){
-    const pName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
-    await FS.addDoc(FS.collection(db,"damagedStock"),{branchId,productId:item.productId,quantity:item.qty,reason:item.reason,note:item.note,spillingItems:item.spill,missingItems:item.missing,packagingDamaged:item.pkg,reportedBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
-    const sid=branchId+"_"+item.productId;
-    const sRef=FS.doc(db,"stock",sid);
-    const sSnap=await FS.getDoc(sRef);
-    if(sSnap.exists())await FS.updateDoc(sRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
-    summaryParts.push(pName+" x"+item.qty+" ("+item.reason.replace(/_/g," ")+")");
-  }
-  await FS.addDoc(FS.collection(db,"notifications"),{type:"damage",title:"Damage reported — "+bName,description:summaryParts.join(" | ")+" · By "+staffName,branchId,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
-  closeModal("modal-damage");
-  window._dmgItems=[];
-  loadDamageList();
-  setLoading(false);
-  alert("✓ "+valid.length+" damage report(s) submitted!");
-};
-
 // ── MULTI-PRODUCT TRANSFER ───────────────────────────────
 window._trItems = [];
-window.initTransferForm = () => {
-  window._trItems = [];
-  addTrProduct();
-};
-window.addTrProduct = () => {
-  window._trItems.push({productId:"",qty:0});
-  renderTrProducts();
-};
 window.removeTrProduct = (idx) => {
   window._trItems.splice(idx,1);
   if(!window._trItems.length) addTrProduct();
   else renderTrProducts();
 };
-window.renderTrProducts = () => {
-  const container=document.getElementById("tr-products-container");
-  if(!container) return;
-  container.innerHTML = window._trItems.map((item,idx)=>`
-    <div style="border:0.5px solid #e5e5e0;border-radius:10px;margin-bottom:10px;overflow:hidden">
-      <div style="background:#f0f7ff;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #B5D4F4">
-        <span style="font-size:12px;font-weight:600;color:#1558B0">Product ${idx+1}</span>
-        ${window._trItems.length>1?`<button onclick="removeTrProduct(${idx})" style="background:none;border:none;cursor:pointer;color:#E24B4A;font-size:18px"><i class="ti ti-trash"></i></button>`:""}
-      </div>
-      <div style="padding:10px 12px">
-        <div class="form-row">
-          <div class="form-field" style="flex:2"><label>Product</label>
-            <select onchange="window._trItems[${idx}].productId=this.value" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:13px">
-              <option value="">Select product…</option>
-              ${(window._products||[]).map(p=>`<option value="${p.id}" ${item.productId===p.id?"selected":""}>${p.name}</option>`).join("")}
-            </select>
-          </div>
-          <div class="form-field" style="flex:1"><label>Qty (cases)</label>
-            <input type="number" placeholder="0" min="0" value="${item.qty||""}" oninput="window._trItems[${idx}].qty=parseInt(this.value)||0" style="width:100%;padding:8px;border:0.5px solid #ddd;border-radius:7px;font-size:14px;font-weight:600">
-          </div>
-        </div>
-      </div>
-    </div>`).join("");
-};
-window.saveTransferMulti = async () => {
-  const fromBranch=document.getElementById("inp-tr-from").value;
-  const toBranch=document.getElementById("inp-tr-to").value;
-  if(!fromBranch||!toBranch){alert("Select both branches");return;}
-  if(fromBranch===toBranch){alert("From and To branches must be different");return;}
-  const valid=window._trItems.filter(i=>i.productId&&i.qty>0);
-  if(!valid.length){alert("Add at least one product with quantity");return;}
-  setLoading(true);
-  const db=window.DB;const FS=window.FS;
-  const fromName=(window._branches||[]).find(b=>b.id===fromBranch)?.name||"Branch";
-  const toName=(window._branches||[]).find(b=>b.id===toBranch)?.name||"Branch";
-  const staffName=window.CURRENT_USER?.fullName||"Staff";
-  const summaryParts=[];
-  for(const item of valid){
-    const pName=(window._products||[]).find(p=>p.id===item.productId)?.name||"Product";
-    await FS.addDoc(FS.collection(db,"transfers"),{fromBranchId:fromBranch,toBranchId:toBranch,productId:item.productId,quantity:item.qty,status:"completed",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
-    const fromRef=FS.doc(db,"stock",fromBranch+"_"+item.productId);
-    const toRef=FS.doc(db,"stock",toBranch+"_"+item.productId);
-    const fromSnap=await FS.getDoc(fromRef);
-    const toSnap=await FS.getDoc(toRef);
-    if(fromSnap.exists())await FS.updateDoc(fromRef,{quantity:FS.increment(-item.qty),updatedAt:FS.serverTimestamp()});
-    if(toSnap.exists())await FS.updateDoc(toRef,{quantity:FS.increment(item.qty),updatedAt:FS.serverTimestamp()});
-    else await FS.setDoc(toRef,{branchId:toBranch,productId:item.productId,quantity:item.qty,updatedAt:FS.serverTimestamp()});
-    await FS.addDoc(FS.collection(db,"stockMovements"),{type:"transfer_out",branchId:fromBranch,productId:item.productId,quantity:-item.qty,reason:"branch_transfer",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
-    await FS.addDoc(FS.collection(db,"stockMovements"),{type:"transfer_in",branchId:toBranch,productId:item.productId,quantity:item.qty,reason:"branch_transfer",createdBy:window.CURRENT_USER.uid,createdAt:FS.serverTimestamp()});
-    summaryParts.push(pName+" x"+item.qty);
-  }
-  await FS.addDoc(FS.collection(db,"notifications"),{type:"transfer",title:"Stock transfer: "+fromName+" → "+toName,description:summaryParts.join(" | ")+" · By "+staffName,branchId:fromBranch,isRead:false,targetRole:"ceo",createdAt:FS.serverTimestamp()});
-  closeModal("modal-transfer");
-  window._trItems=[];
-  loadTransferList();
-  setLoading(false);
-  alert("✓ "+valid.length+" product(s) transferred!");
-};
-
 window.saveDamage = async () => {
   const branchId  = document.getElementById("inp-dmg-branch").value;
   const productId = document.getElementById("inp-dmg-product").value;
