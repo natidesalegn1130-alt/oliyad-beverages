@@ -794,7 +794,7 @@ window.startRealtimeListeners = () => {
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#1a1a18;font-size:14px;min-height:100vh}
+body{font-family:system-ui,-apple-system,sans-serif;background:#1a3545;background-size:cover;background-position:center;background-attachment:fixed;color:#1a1a18;font-size:14px;min-height:100vh}
 :root{--brand:#1558B0;--brand-d:#0C447C;--brand-l:#E6F1FB}
 .app{display:flex;flex-direction:column;min-height:100vh}
 .topbar{height:56px;background:var(--brand);display:flex;align-items:center;padding:0 16px;gap:10px;position:sticky;top:0;z-index:100}
@@ -805,16 +805,16 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#1a
 .user-chip{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.15);border-radius:20px;padding:4px 10px 4px 4px;border:0.5px solid rgba(255,255,255,.2);cursor:pointer}
 .user-avatar{width:26px;height:26px;border-radius:50%;background:#B5D4F4;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#0C447C}
 .user-role{font-size:11px;color:rgba(255,255,255,.85)}
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;height:60px;background:#fff;border-top:0.5px solid #e5e5e0;display:flex;z-index:100}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;height:60px;background:rgba(255,255,255,.92);border-top:0.5px solid rgba(255,255,255,.4);display:flex;z-index:100;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;border:none;background:none;color:#888;font-size:10px;transition:color .15s}
 .nav-item.active{color:var(--brand)}
 .nav-item i{font-size:22px}
 .content{flex:1;padding:12px 12px 72px;overflow-y:auto}
 .page{display:none}.page.active{display:block}
-.card{background:#fff;border:0.5px solid #e5e5e0;border-radius:12px;padding:14px;margin-bottom:10px}
+.card{background:rgba(255,255,255,.93);border:0.5px solid rgba(255,255,255,.6);border-radius:12px;padding:14px;margin-bottom:10px}
 .card-title{font-size:11px;color:#666;margin-bottom:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:500}
 .stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}
-.stat-card{background:#f5f5f0;border-radius:8px;padding:12px}
+.stat-card{background:rgba(255,255,255,.90);border-radius:8px;padding:12px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .stat-label{font-size:11px;color:#666;margin-bottom:4px}
 .stat-value{font-size:20px;font-weight:700}
 .stat-sub{font-size:11px;color:#888;margin-top:2px}
@@ -856,7 +856,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#1a
 .tab-btn.active{background:#fff;color:#1a1a18}
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center;padding:16px}
 .modal-bg.open{display:flex}
-.modal{background:#fff;border-radius:12px;width:100%;max-width:360px;padding:18px;max-height:90vh;overflow-y:auto}
+.modal{background:rgba(255,255,255,.96);border-radius:12px;width:100%;max-width:360px;padding:18px;max-height:90vh;overflow-y:auto;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 8px 40px rgba(0,0,0,.25)}
 .modal-title{font-size:16px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center}
 .form-field{margin-bottom:10px}
 .form-field label{font-size:12px;color:#666;display:block;margin-bottom:4px;font-weight:500}
@@ -867,24 +867,25 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#1a
 .login-logo{font-size:28px;font-weight:900;color:#fff;margin-bottom:4px;position:relative;z-index:1;text-shadow:0 2px 12px rgba(0,0,0,.4)}
 .login-sub{font-size:12px;color:rgba(255,255,255,.75);margin-bottom:24px;text-align:center;position:relative;z-index:1;text-shadow:0 1px 6px rgba(0,0,0,.4)}
 .login-card{
-  background:rgba(255,255,255,.12);
+  background:rgba(40,50,65,.45);
   backdrop-filter:blur(20px) saturate(150%);
   -webkit-backdrop-filter:blur(20px) saturate(150%);
   border-radius:20px;
   border:1px solid rgba(255,255,255,.25);
   box-shadow:0 8px 32px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.3);
-  padding:28px 26px;
+  padding:26px 26px 22px;
   width:100%;max-width:340px;
   position:relative;z-index:1;
 }
-.login-card .form-field label{color:rgba(255,255,255,.85)!important}
+.login-card .form-field{margin-bottom:6px!important}
+.login-card .form-field label{color:rgba(255,255,255,.85)!important;font-size:11px!important;margin-bottom:2px!important}
 .login-card input{
-  background:rgba(255,255,255,.1)!important;
+  background:rgba(255,255,255,.08)!important;
   border:none!important;
   border-bottom:1px solid rgba(255,255,255,.4)!important;
   border-radius:0!important;
   color:#fff!important;
-  padding:10px 4px!important;
+  padding:8px 4px!important;
 }
 .login-card input::placeholder{color:rgba(255,255,255,.5)}
 .login-card input:focus{border-bottom-color:#fff!important;outline:none}
@@ -983,7 +984,7 @@ body{background:var(--t-bg)!important;color:var(--t-text)!important}
 /* ===== SIDEBAR LAYOUT ===== */
 @media(min-width:769px){
   .app{flex-direction:row}
-  .sidebar{display:flex;flex-direction:column;width:230px;min-height:100vh;background:var(--t-sidebar-bg,var(--t-topbar-bg));border-right:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15));flex-shrink:0}
+  .sidebar{display:flex;flex-direction:column;width:230px;height:100vh;position:fixed;top:0;left:0;background:var(--t-sidebar-bg,var(--t-topbar-bg));border-right:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15));flex-shrink:0;z-index:100;overflow-y:auto}
   .sidebar-brand{padding:18px 16px;font-weight:800;font-size:16px;color:var(--t-sidebar-text,#fff);display:flex;align-items:center;gap:8px;border-bottom:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15))}
   .sidebar-brand .topbar-sub{display:block;font-size:11px;font-weight:400;color:var(--t-sidebar-text2,rgba(255,255,255,.7));margin-top:2px}
   .sidebar-icons{display:flex;gap:6px;padding:10px 12px;border-bottom:0.5px solid var(--t-sidebar-border,rgba(255,255,255,.15))}
@@ -1003,7 +1004,7 @@ body{background:var(--t-bg)!important;color:var(--t-text)!important}
   /* hide mobile topbar + bottom nav on desktop */
   .topbar{display:none!important}
   .bottom-nav{display:none!important}
-  .content{flex:1;min-width:0}
+  .content{flex:1;min-width:0;margin-left:230px}
   .dash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 }
 @media(max-width:768px){
@@ -1017,6 +1018,9 @@ body{background:var(--t-bg)!important;color:var(--t-text)!important}
 .dash-card-label{font-size:12px;color:var(--t-text2,#666);font-weight:500}
 .dash-card-value{font-size:22px;font-weight:800;color:var(--t-text,#1a1a18)}
 .dash-card-sub{font-size:11px;color:var(--t-text3,#999)}
+
+body::after{content:"";position:fixed;inset:0;background:linear-gradient(135deg,rgba(10,30,50,.55) 0%,rgba(15,45,65,.45) 50%,rgba(10,40,55,.55) 100%);z-index:0;pointer-events:none}
+#main-app,#login-screen{position:relative;z-index:1}
 </style>
 
 <style>
@@ -1081,8 +1085,20 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
   <div class="login-sub">Wholesale Management System</div>
   <div class="login-card">
     <div class="login-title">LOGIN</div>
-    <div class="form-field"><label>Email</label><input id="li-email" type="email" placeholder="your@email.com"></div>
-    <div class="form-field"><label>Password</label><input id="li-pass" type="password" placeholder="Password"></div>
+    <div style="margin-bottom:14px">
+      <label style="color:rgba(255,255,255,.85);font-size:11px;font-weight:500;display:block;margin-bottom:6px;letter-spacing:.5px">Email</label>
+      <div style="display:flex;align-items:center;border-bottom:1px solid rgba(255,255,255,.4);padding-bottom:8px;gap:10px">
+        <i class="ti ti-user" style="color:rgba(255,255,255,.6);font-size:18px;flex-shrink:0"></i>
+        <input id="li-email" type="email" placeholder="Username" style="flex:1;background:none;border:none;outline:none;color:#fff;font-size:14px;font-family:inherit">
+      </div>
+    </div>
+    <div style="margin-bottom:18px">
+      <label style="color:rgba(255,255,255,.85);font-size:11px;font-weight:500;display:block;margin-bottom:6px;letter-spacing:.5px">Password</label>
+      <div style="display:flex;align-items:center;border-bottom:1px solid rgba(255,255,255,.4);padding-bottom:8px;gap:10px">
+        <i class="ti ti-lock" style="color:rgba(255,255,255,.6);font-size:18px;flex-shrink:0"></i>
+        <input id="li-pass" type="password" placeholder="Password" style="flex:1;background:none;border:none;outline:none;color:#fff;font-size:14px;font-family:inherit">
+      </div>
+    </div>
     <div id="li-error" class="error-text"></div>
     <button class="login-btn" onclick="doLogin()"><i class="ti ti-login"></i> Sign In</button>
   </div>
@@ -2961,6 +2977,16 @@ window.closeThemePicker = () => {
 
 document.getElementById("login-screen").style.display="none";
 document.getElementById("main-app").style.display="none";
+// System background photos
+(function(){
+  const FALLBACK="linear-gradient(135deg,#0d2137 0%,#1a3d5c 40%,#1e5c6e 70%,#1a4a5e 100%)";
+  document.body.style.backgroundImage=FALLBACK;
+  const seed=Math.floor(Math.random()*9000)+1000;
+  const url="https://picsum.photos/seed/"+seed+"/1920/1080?blur=2";
+  const img=new Image();
+  img.onload=()=>{document.body.style.backgroundImage="url('"+url+"')";};
+  img.src=url;
+})();
 
 // ── MULTI-PRODUCT DAMAGE REPORT ──────────────────────────
 window._dmgItems = [];
