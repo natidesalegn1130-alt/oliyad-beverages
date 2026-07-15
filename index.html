@@ -811,7 +811,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a3545!important
 .nav-item i{font-size:22px}
 .content{flex:1;padding:12px 12px 72px;overflow-y:auto;background:transparent}
 .page{display:none}.page.active{display:block}
-.card{background:rgba(255,255,255,.93)!important;border:0.5px solid rgba(255,255,255,.6);border-radius:12px;padding:14px;margin-bottom:10px}
+.card{background:rgba(255,255,255,.78)!important;border:0.5px solid rgba(255,255,255,.5);border-radius:12px;padding:14px;margin-bottom:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .card-title{font-size:11px;color:#666;margin-bottom:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:500}
 .stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}
 .stat-card{background:rgba(255,255,255,.90)!important;border-radius:8px;padding:12px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
@@ -1054,7 +1054,7 @@ body.theme-amber{--t-brand:#854F0B;--t-brand-d:#633806;--t-brand-l:#FAEEDA;--t-t
 body.theme-purple{--t-brand:#3C3489;--t-brand-d:#26215C;--t-brand-l:#EEEDFE;--t-topbar-bg:#3C3489;--t-topbar-text:#fff;--t-topbar-sub:#CECBF6;--t-avatar-bg:#CECBF6;--t-avatar-color:#26215C;--t-nav-active:#534AB7;--t-accent:#EEEDFE;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
 body.theme-auto{--t-brand:#1558B0;--t-brand-d:#0C447C;--t-brand-l:#E6F1FB;--t-topbar-bg:#1558B0;--t-topbar-text:#fff;--t-topbar-sub:#B5D4F4;--t-avatar-bg:#B5D4F4;--t-avatar-color:#0C447C;--t-nav-active:#1558B0;--t-accent:#E6F1FB;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}
 @media(prefers-color-scheme:dark){body.theme-auto{--t-brand:#378ADD;--t-topbar-bg:#111;--t-topbar-text:#fff;--t-topbar-sub:#555;--t-avatar-bg:#185FA5;--t-avatar-color:#B5D4F4;--t-nav-active:#378ADD;color-scheme:dark;--t-sidebar-bg:var(--t-topbar-bg);--t-sidebar-text:#fff;--t-sidebar-text2:rgba(255,255,255,.7);--t-sidebar-active:rgba(255,255,255,.15);--t-sidebar-border:rgba(255,255,255,.15)}}
-body.theme-dark,.theme-dark .card,.theme-dark .modal,.theme-dark .bottom-nav,.theme-dark .topbar,.theme-dark .branch-card{background-color:#111 !important;border-color:#333 !important;color:#eee !important}
+body.theme-dark,.theme-dark .bottom-nav,.theme-dark .topbar{background-color:#111 !important;border-color:#333 !important;color:#eee !important}
 body.theme-dark .stat-card,.theme-dark .tab-bar,.theme-dark .calc-field input,.theme-dark .calc-field select,.theme-dark .form-field input,.theme-dark .form-field select,.theme-dark .form-field textarea{background:#1e1e1e !important;border-color:#333 !important;color:#eee !important}
 body.theme-dark .stat-label,.theme-dark .card-title,.theme-dark .notif-desc,.theme-dark .branch-meta,.theme-dark .notif-time,.theme-dark .tab-btn{color:#888 !important}
 /* dark content bg removed for glass effect */
@@ -1537,8 +1537,14 @@ function setRandomLoginBackground(){
   // Set a nice gradient immediately so it never looks broken
   wrap.style.backgroundImage = LOGIN_BG_FALLBACK;
   // Try to load a real random landscape photo on top; if it loads, swap it in
-  const seed = Math.floor(Math.random()*10000);
-  const url = "https://picsum.photos/seed/" + seed + "/1600/1000";
+  const LOGIN_PHOTOS=[
+    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1600&q=70",
+    "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1600&q=70",
+    "https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=1600&q=70",
+    "https://images.unsplash.com/photo-1505118380757-91f5f5632de0?w=1600&q=70",
+    "https://images.unsplash.com/photo-1458668383970-8ddd3927deed?w=1600&q=70"
+  ];
+  const url = LOGIN_PHOTOS[Math.floor(Math.random()*LOGIN_PHOTOS.length)];
   const img = new Image();
   img.onload = () => { wrap.style.backgroundImage = "url('" + url + "')"; };
   img.onerror = () => { /* keep gradient fallback */ };
@@ -2977,14 +2983,28 @@ window.closeThemePicker = () => {
 
 document.getElementById("login-screen").style.display="none";
 document.getElementById("main-app").style.display="none";
-// System background photos
+// System background photos (curated blue/teal landscapes)
 (function(){
   const FALLBACK="linear-gradient(135deg,#0d2137 0%,#1a3d5c 40%,#1e5c6e 70%,#1a4a5e 100%)";
-  document.body.style.backgroundImage=FALLBACK;
-  const seed=Math.floor(Math.random()*9000)+1000;
-  const url="https://picsum.photos/seed/"+seed+"/1920/1080?blur=2";
+  document.body.style.background=FALLBACK;
+  document.body.style.backgroundSize="cover";
+  document.body.style.backgroundAttachment="fixed";
+  const PHOTOS=[
+    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1920&q=70",
+    "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1920&q=70",
+    "https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=1920&q=70",
+    "https://images.unsplash.com/photo-1505118380757-91f5f5632de0?w=1920&q=70",
+    "https://images.unsplash.com/photo-1458668383970-8ddd3927deed?w=1920&q=70"
+  ];
+  const url=PHOTOS[Math.floor(Math.random()*PHOTOS.length)];
   const img=new Image();
-  img.onload=()=>{document.body.style.backgroundImage="url('"+url+"')";};
+  img.onload=()=>{
+    document.body.style.backgroundImage="url('"+url+"')";
+    document.body.style.backgroundSize="cover";
+    document.body.style.backgroundPosition="center";
+    document.body.style.backgroundAttachment="fixed";
+  };
+  img.onerror=()=>{};
   img.src=url;
 })();
 
