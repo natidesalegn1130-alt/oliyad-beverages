@@ -811,10 +811,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a3545!important
 .nav-item i{font-size:22px}
 .content{flex:1;padding:12px 12px 72px;overflow-y:auto;background:transparent}
 .page{display:none}.page.active{display:block}
-.card{background:rgba(255,255,255,.78)!important;border:0.5px solid rgba(255,255,255,.5);border-radius:12px;padding:14px;margin-bottom:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.card{background:rgba(255,255,255,.65)!important;border:0.5px solid rgba(255,255,255,.65);border-radius:12px;padding:14px;margin-bottom:10px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .card-title{font-size:11px;color:#666;margin-bottom:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:500}
 .stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}
-.stat-card{background:rgba(255,255,255,.90)!important;border-radius:8px;padding:12px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.stat-card{background:rgba(255,255,255,.65);border-radius:8px;padding:12px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .stat-label{font-size:11px;color:#666;margin-bottom:4px}
 .stat-value{font-size:20px;font-weight:700}
 .stat-sub{font-size:11px;color:#888;margin-top:2px}
@@ -1012,7 +1012,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a3545!important
 }
 /* ===== DASHBOARD CARDS (all sizes) ===== */
 .dash-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:10px}
-.dash-card{background:var(--t-surface,#fff);border:0.5px solid var(--t-border,#e5e5e0);border-radius:12px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:box-shadow .15s,transform .15s}
+.dash-card{background:rgba(255,255,255,.65);border:0.5px solid var(--t-border,#e5e5e0);border-radius:12px;padding:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:box-shadow .15s,transform .15s;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,0,0,.1)}
 .dash-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
 .dash-card-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;background:var(--t-brand-l,#E6F1FB);color:var(--t-brand,#1558B0)}
 .dash-card-label{font-size:12px;color:var(--t-text2,#666);font-weight:500}
@@ -2990,11 +2990,11 @@ document.getElementById("main-app").style.display="none";
   document.body.style.backgroundSize="cover";
   document.body.style.backgroundAttachment="fixed";
   const PHOTOS=[
-    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1920&q=70",
-    "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1920&q=70",
-    "https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=1920&q=70",
-    "https://images.unsplash.com/photo-1505118380757-91f5f5632de0?w=1920&q=70",
-    "https://images.unsplash.com/photo-1458668383970-8ddd3927deed?w=1920&q=70"
+    "https://picsum.photos/id/1018/1920/1080",
+    "https://picsum.photos/id/1015/1920/1080",
+    "https://picsum.photos/id/1043/1920/1080",
+    "https://picsum.photos/id/1039/1920/1080",
+    "https://picsum.photos/id/1036/1920/1080"
   ];
   const url=PHOTOS[Math.floor(Math.random()*PHOTOS.length)];
   const img=new Image();
