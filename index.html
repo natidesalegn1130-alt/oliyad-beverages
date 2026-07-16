@@ -1021,6 +1021,33 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#1a3545!important
 
 body::after{content:"";position:fixed;inset:0;background:linear-gradient(135deg,rgba(10,30,50,.55) 0%,rgba(15,45,65,.45) 50%,rgba(10,40,55,.55) 100%);z-index:0;pointer-events:none}
 #main-app,#login-screen{position:relative;z-index:1}
+
+/* ── LIQUID GLASS EFFECT (same as login) ── */
+.card,.stat-card,.branch-card,.dash-card,.tab-bar,
+.sec-header,.tbl thead,.badge-wrap{
+  background:rgba(255,255,255,.12)!important;
+  backdrop-filter:blur(18px) saturate(160%)!important;
+  -webkit-backdrop-filter:blur(18px) saturate(160%)!important;
+  border:1px solid rgba(255,255,255,.22)!important;
+  box-shadow:0 4px 24px rgba(0,0,0,.18)!important;
+}
+.card *,.stat-card *,.branch-card *,.dash-card *{color:#fff!important}
+.dash-card-icon{background:rgba(255,255,255,.15)!important}
+.dash-card-value{color:#fff!important}
+.dash-card-label,.dash-card-sub{color:rgba(255,255,255,.8)!important}
+.sec-title,.card-title,.page h2{color:#fff!important}
+.tbl th{background:rgba(0,0,0,.2)!important;color:rgba(255,255,255,.9)!important;border-color:rgba(255,255,255,.15)!important}
+.tbl td{border-color:rgba(255,255,255,.08)!important;color:#fff!important}
+.modal{background:rgba(20,35,55,.85)!important;backdrop-filter:blur(24px) saturate(160%)!important;-webkit-backdrop-filter:blur(24px) saturate(160%)!important;border:1px solid rgba(255,255,255,.2)!important;box-shadow:0 8px 40px rgba(0,0,0,.4)!important;color:#fff!important}
+.modal *{color:#fff!important}
+.modal input,.modal select,.modal textarea{background:rgba(255,255,255,.1)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}
+.modal input::placeholder,.modal select::placeholder,.modal textarea::placeholder{color:rgba(255,255,255,.5)!important}
+.form-field label{color:rgba(255,255,255,.85)!important}
+.modal-title{color:#fff!important}
+.btn{background:rgba(255,255,255,.15)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}
+.btn-primary{background:rgba(45,168,232,.7)!important;border-color:rgba(45,168,232,.5)!important}
+.empty-state{color:rgba(255,255,255,.6)!important}
+.notif-title,.notif-desc,.notif-time{color:#fff!important}
 </style>
 
 <style>
@@ -2983,30 +3010,20 @@ window.closeThemePicker = () => {
 
 document.getElementById("login-screen").style.display="none";
 document.getElementById("main-app").style.display="none";
-// System background photos (curated blue/teal landscapes)
+// Apply same background photo to body as login screen
 (function(){
   const FALLBACK="linear-gradient(135deg,#0d2137 0%,#1a3d5c 40%,#1e5c6e 70%,#1a4a5e 100%)";
-  document.body.style.background=FALLBACK;
+  const PHOTOS=["https://picsum.photos/id/1018/1920/1080","https://picsum.photos/id/1015/1920/1080","https://picsum.photos/id/1043/1920/1080","https://picsum.photos/id/1039/1920/1080","https://picsum.photos/id/1036/1920/1080"];
+  document.body.style.backgroundImage=FALLBACK;
   document.body.style.backgroundSize="cover";
+  document.body.style.backgroundPosition="center";
   document.body.style.backgroundAttachment="fixed";
-  const PHOTOS=[
-    "https://picsum.photos/id/1018/1920/1080",
-    "https://picsum.photos/id/1015/1920/1080",
-    "https://picsum.photos/id/1043/1920/1080",
-    "https://picsum.photos/id/1039/1920/1080",
-    "https://picsum.photos/id/1036/1920/1080"
-  ];
   const url=PHOTOS[Math.floor(Math.random()*PHOTOS.length)];
   const img=new Image();
-  img.onload=()=>{
-    document.body.style.backgroundImage="url('"+url+"')";
-    document.body.style.backgroundSize="cover";
-    document.body.style.backgroundPosition="center";
-    document.body.style.backgroundAttachment="fixed";
-  };
-  img.onerror=()=>{};
+  img.onload=()=>{document.body.style.backgroundImage="url('"+url+"')";document.body.style.backgroundSize="cover";document.body.style.backgroundPosition="center";document.body.style.backgroundAttachment="fixed";};
   img.src=url;
 })();
+
 
 // ── MULTI-PRODUCT DAMAGE REPORT ──────────────────────────
 window._dmgItems = [];
