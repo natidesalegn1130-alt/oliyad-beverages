@@ -809,16 +809,16 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#F7F8FA;color:#1a
 .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;border:none;background:none;color:#888;font-size:10px;transition:color .15s}
 .nav-item.active{color:var(--brand)}
 .nav-item i{font-size:22px}
-.content{flex:1;padding:12px 12px 72px;overflow-y:auto;background:#F7F8FA}
+.content{flex:1;padding:12px 12px 72px;overflow-y:auto;overflow-x:hidden;background:#F7F8FA}
 .page{display:none}.page.active{display:block}
-.card{background:#fff;border:0.5px solid #e5e5e0;border-radius:12px;padding:14px;margin-bottom:10px}
+.card{background:#fff;border:0.5px solid #e5e5e0;border-radius:12px;padding:14px;margin-bottom:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .card-title{font-size:11px;color:#666;margin-bottom:10px;text-transform:uppercase;letter-spacing:.6px;font-weight:500}
 .stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}
 .stat-card{background:#f5f5f0;border-radius:8px;padding:12px}
 .stat-label{font-size:11px;color:#666;margin-bottom:4px}
 .stat-value{font-size:20px;font-weight:700}
 .stat-sub{font-size:11px;color:#888;margin-top:2px}
-.tbl{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.tbl{width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;min-width:480px}
 .tbl th{text-align:left;padding:6px;color:#666;font-weight:500;border-bottom:0.5px solid #e5e5e0;font-size:11px}
 .tbl td{padding:7px 6px;border-bottom:0.5px solid #e5e5e0;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tbl tr:last-child td{border-bottom:none}
@@ -940,7 +940,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#F7F8FA;color:#1a
 .user-avatar{background:var(--t-brand-avatar-bg)!important;color:var(--t-brand-avatar-text)!important}
 .bottom-nav{background:var(--t-nav-bg)!important;border-top-color:var(--t-border)!important}
 .nav-item.active{color:var(--t-brand)!important}
-.card{color:var(--t-text)!important}
+.card{color:var(--t-text,#1a1a18)}
 .card-title{color:var(--t-text2)!important}
 /* stat-card bg managed by glass CSS */
 .stat-label{color:var(--t-text2)!important}
@@ -1029,6 +1029,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#F7F8FA;color:#1a
 
 
 
+
+/* Mobile horizontal scroll for tables */
+@media(max-width:768px){
+  .card{padding:10px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tbl{min-width:500px;font-size:12px}
+  .tbl th,.tbl td{padding:8px 6px;white-space:nowrap}
+  .dash-cards{grid-template-columns:1fr 1fr}
+}
 </style>
 
 <style>
