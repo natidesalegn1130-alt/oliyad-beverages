@@ -129,7 +129,7 @@ window.loadStock = async () => {
   const list = [];
   snaps.forEach(d => {
     const data = d.data();
-    if (u.role === "ceo" || data.branchId === u.branchId) list.push({ id: d.id, ...data });
+    if ((data.quantity||0) > 0 && (u.role === "ceo" || data.branchId === u.branchId)) list.push({ id: d.id, ...data });
   });
   renderStock(list);
 };
@@ -1217,7 +1217,7 @@ body.theme-dark .btn{background:#1e1e1e !important;border-color:#333 !important;
     </div>
 
     <div class="page" id="page-stock">
-      <div class="sec-header"><div class="sec-title">Products & Stock</div><div style="display:flex;gap:6px"><button class="btn btn-sm" onclick="openModal('modal-set-price');loadPricesList()"><i class="ti ti-tag"></i> Set Prices</button></div></div>
+      <div class="sec-header"><div class="sec-title">Products & Stock</div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-primary" onclick="openModal('modal-adjustment')"><i class="ti ti-adjustments"></i> Stock Adjustment</button><button class="btn btn-sm" onclick="openModal('modal-set-price');loadPricesList()"><i class="ti ti-tag"></i> Set Prices</button></div></div>
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="tab-products" onclick="switchTab(this,'tab-products')">Products</button>
         <button class="tab-btn" data-tab="tab-stock" onclick="switchTab(this,'tab-stock')">Stock</button>
@@ -1963,7 +1963,7 @@ function renderStock(list){
   const bMap={}; (window._branches||[]).forEach(b=>bMap[b.id]=b.name);
   const pMap={}; (window._products||[]).forEach(p=>pMap[p.id]=p.name);
   const btn='<button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="openModal(\'modal-adjustment\')"><i class="ti ti-adjustments"></i> Stock Adjustment</button>';
-  if(!list.length){ document.getElementById("tab-stock").innerHTML='<div class="empty-state">No stock records yet.</div>'+btn; return; }
+  if(!list.length){ document.getElementById("tab-stock").innerHTML='<div class="empty-state">No stock available.</div>'; return; }
   const today3 = new Date(); const threeMo2 = new Date(); threeMo2.setMonth(threeMo2.getMonth()+3);
   const expBadge2 = (s) => {
     if (!s.earliestExpiry || s.quantity <= 0) return "";
@@ -1972,7 +1972,7 @@ function renderStock(list){
     if (exp <= threeMo2) return `<span class="badge" style="background:#FAEEDA;color:#854F0B;font-size:10px;margin-left:4px">Exp ${s.earliestExpiry}</span>`;
     return `<span style="font-size:10px;color:#999;margin-left:4px">Exp ${s.earliestExpiry}</span>`;
   };
-  document.getElementById("tab-stock").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:36%"><col style="width:30%"><col style="width:34%"></colgroup><thead><tr><th>Product</th><th>Branch</th><th>Qty</th></tr></thead><tbody>${list.map(s=>`<tr><td>${pMap[s.productId]||s.productId}</td><td>${bMap[s.branchId]||s.branchId}</td><td>${s.quantity<20?`<span style="color:#E24B4A;font-weight:700">${s.quantity}</span>`:s.quantity<50?`<span style="color:#EF9F27;font-weight:700">${s.quantity}</span>`:s.quantity}${expBadge2(s)}</td></tr>`).join("")}</tbody></table></div>`+btn;
+  document.getElementById("tab-stock").innerHTML=`<div class="card"><table class="tbl"><colgroup><col style="width:36%"><col style="width:30%"><col style="width:34%"></colgroup><thead><tr><th>Product</th><th>Branch</th><th>Qty</th></tr></thead><tbody>${list.map(s=>`<tr><td>${pMap[s.productId]||s.productId}</td><td>${bMap[s.branchId]||s.branchId}</td><td>${s.quantity<20?`<span style="color:#E24B4A;font-weight:700">${s.quantity}</span>`:s.quantity<50?`<span style="color:#EF9F27;font-weight:700">${s.quantity}</span>`:s.quantity}${expBadge2(s)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 window._lastOrdersList = [];
